@@ -1,0 +1,324 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
+using Api.Data;
+using Api.Model;
+using Api.Services.Auth;
+using Api.Services.Storage;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+
+namespace Api.Services.Models;
+
+public record ModelUploadFile(string Path, long Size);
+
+public record ModelUploadRequest(long SiteId, List<ModelUploadFile> Files);
+
+public record ModelUploadUrl(string Path, string Url, string ContentType);
+
+/// <summary>Signed PUT URLs for every file of the model; the files are registered together by <see cref="Prefix"/>.</summary>
+public record ModelUploadTicket(string Prefix, List<ModelUploadUrl> Files, DateTime ExpiresAt);
+
+/// <summary>
+/// Placement of a model without georeference (FR-I1): the model origin at a WGS84 point, <see cref="HeightM"/> metres
+/// above the site's base height, the model's forward axis (glTF −Z) turned <see cref="HeadingDeg"/> clockwise from north.
+/// </summary>
+public record ModelPlacement(double Lon, double Lat, double HeightM, double HeadingDeg);
+
+public record ModelCreate(string Prefix, string Name, long? NodeId, ModelPlacement? Placement, string? ElementIdProperty);
+
+/// <summary>Partial update; null = not sent (<see cref="NodeIdSet"/> distinguishes unlinking from the node).</summary>
+public record ModelUpdate(string? Name = null, long? NodeId = null, bool NodeIdSet = false, ModelPlacement? Placement = null);
+
+/// <summary>
+/// 3D models of a site (spec 4.8, 9, FR-I1): a single GLB or a ready 3D Tiles package, uploaded file by file with
+/// signed URLs straight to the object store. The bytes never pass the API (NFR-3): the API serves only the
+/// tileset.json (metadata), rewritten so that every tile content is a short-lived signed URL of the store and every
+/// nested tileset comes through this endpoint again. A GLB is served as a one-tile 3D Tiles 1.1 tileset whose root
+/// transform carries the placement – so the classification volumes of the boxes (spec 9.1) work on every model.
+/// Processing chain (spec 9.2, open): conversion from IFC / DWG / photogrammetry happens outside, see docs.
+/// </summary>
+public partial class ModelService(AppDbContext db, IObjectStorage storage, CurrentUser currentUser, IOptions<StorageOptions> storageOptions)
+{
+    public const string TilesetFile = "tileset.json";
+    private const int MaxFiles = 20000;
+    private const long MaxTilesetBytes = 64L * 1024 * 1024;
+
+    [GeneratedRegex(@"^org/\d+/models/[0-9a-f]{32}/")]
+    private static partial Regex PrefixRegex();
+
+    private string ModelsPrefix => $"org/{currentUser.OrganizationId}/models/";
+
+    public async Task<ModelUploadTicket> CreateUploadAsync(ModelUploadRequest request, CancellationToken ct)
+    {
+        await RequireSiteAsync(request.SiteId, ct);
+        currentUser.RequireEditableSite(request.SiteId);
+        var files = request.Files ?? [];
+        if (files.Count == 0 || files.Count > MaxFiles)
+            throw AppException.BadRequest("model.invalid_files", $"A model is 1 to {MaxFiles} files.");
+        var maxBytes = storageOptions.Value.MaxModelMb * 1024L * 1024L;
+        if (files.Any(f => f.Size < 0) || files.Sum(f => f.Size) > maxBytes)
+            throw AppException.BadRequest("model.too_large", $"A model may be at most {storageOptions.Value.MaxModelMb} MB.");
+        var paths = files.Select(f => ValidPath(f.Path)).ToList();
+        if (paths.Distinct(StringComparer.Ordinal).Count() != paths.Count)
+            throw AppException.BadRequest("model.invalid_files", "Duplicate file paths.");
+        if (!paths.Contains(TilesetFile) && !(paths.Count == 1 && IsGlb(paths[0])))
+            throw AppException.BadRequest("model.unknown_format", "Upload a single .glb, or a 3D Tiles package with tileset.json at its root.");
+
+        var prefix = $"{ModelsPrefix}{Guid.NewGuid():N}/";
+        var urls = paths.Select(p => new ModelUploadUrl(p, storage.PresignPut(prefix + p, ContentTypeOf(p)), ContentTypeOf(p))).ToList();
+        return new ModelUploadTicket(prefix, urls, DateTime.UtcNow.AddMinutes(storageOptions.Value.UploadUrlMinutes));
+    }
+
+    public async Task<ModelAsset> CreateAsync(long siteId, ModelCreate request, CancellationToken ct)
+    {
+        await RequireSiteAsync(siteId, ct);
+        var prefix = request.Prefix ?? "";
+        // Only this organization's upload prefixes, never an arbitrary part of the store.
+        if (!prefix.StartsWith(ModelsPrefix, StringComparison.Ordinal) || PrefixRegex().Match(prefix) is not { Success: true } m || m.Value != prefix)
+            throw AppException.BadRequest("model.invalid_upload", "Unknown upload.");
+        if (await db.ModelAssets.IgnoreQueryFilters().AnyAsync(a => a.StorageKey.StartsWith(prefix), ct))
+            throw AppException.Conflict("model.upload_used", "This upload is already registered.");
+        if (string.IsNullOrWhiteSpace(request.Name))
+            throw AppException.BadRequest("model.name_required", "name is required.");
+        if (request.NodeId is { } nodeId) await RequireNodeAsync(nodeId, siteId, ct);
+
+        var keys = await storage.ListAsync(prefix, ct);
+        var asset = new ModelAsset { SiteId = siteId, NodeId = request.NodeId };
+        var attrs = new JsonObject { ["name"] = request.Name.Trim() };
+        if (keys.Contains(prefix + TilesetFile))
+        {
+            // A 3D Tiles package carries its own placement (georeferenced root transform).
+            asset.Kind = "3dtiles";
+            asset.StorageKey = prefix + TilesetFile;
+            var root = await ReadTilesetAsync(asset.StorageKey, ct);
+            if (root["asset"]?["version"] is null)
+                throw AppException.BadRequest("model.invalid_tileset", "tileset.json has no asset.version.");
+        }
+        else if (keys.Count == 1 && IsGlb(keys[0]))
+        {
+            asset.Kind = "gltf";
+            asset.StorageKey = keys[0];
+            attrs["placement"] = PlacementNode(request.Placement
+                ?? throw AppException.BadRequest("model.placement_required", "A GLB has no georeference: placement (lon, lat, heightM, headingDeg) is required."));
+        }
+        else throw AppException.BadRequest("model.upload_missing", "The files have not been uploaded (or the upload expired).");
+
+        if (!string.IsNullOrWhiteSpace(request.ElementIdProperty)) attrs["element_id_property"] = request.ElementIdProperty.Trim();
+        asset.Attrs = JsonSerializer.SerializeToDocument(attrs);
+        db.ModelAssets.Add(asset);
+        await db.SaveChangesAsync(ct);
+        return asset;
+    }
+
+    public async Task<List<ModelAsset>> ListAsync(long siteId, CancellationToken ct)
+    {
+        await RequireSiteAsync(siteId, ct);
+        return await db.ModelAssets.AsNoTracking().Where(m => m.SiteId == siteId).OrderBy(m => m.Id).ToListAsync(ct);
+    }
+
+    public async Task<ModelAsset> GetAsync(long id, CancellationToken ct) =>
+        await db.ModelAssets.AsNoTracking().FirstOrDefaultAsync(m => m.Id == id, ct)
+        ?? throw AppException.NotFound("model.not_found", $"Model {id} not found.");
+
+    public async Task<ModelAsset> UpdateAsync(long id, ModelUpdate request, CancellationToken ct)
+    {
+        var asset = await db.ModelAssets.FirstOrDefaultAsync(m => m.Id == id, ct)
+            ?? throw AppException.NotFound("model.not_found", $"Model {id} not found.");
+        var attrs = JsonNode.Parse(asset.Attrs.RootElement.GetRawText())!.AsObject();
+        if (request.Name is { } name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) throw AppException.BadRequest("model.name_required", "name is required.");
+            attrs["name"] = name.Trim();
+        }
+        if (request.Placement is { } placement)
+        {
+            if (asset.Kind != "gltf") throw AppException.BadRequest("model.georeferenced", "A 3D Tiles package carries its own placement.");
+            attrs["placement"] = PlacementNode(placement);
+        }
+        if (request.NodeIdSet)
+        {
+            if (request.NodeId is { } nodeId) await RequireNodeAsync(nodeId, asset.SiteId, ct);
+            asset.NodeId = request.NodeId;
+        }
+        asset.Attrs = JsonSerializer.SerializeToDocument(attrs);
+        await db.SaveChangesAsync(ct);
+        return asset;
+    }
+
+    public async Task DeleteAsync(long id, CancellationToken ct)
+    {
+        var asset = await db.ModelAssets.FirstOrDefaultAsync(m => m.Id == id, ct)
+            ?? throw AppException.NotFound("model.not_found", $"Model {id} not found.");
+        db.ModelAssets.Remove(asset);
+        await db.SaveChangesAsync(ct);
+        // Boxes (region anchors) do not depend on the model and stay valid for a replacement survey (spec 9.1).
+        // Objects after the row: an orphan file is cleaned up later (spec 6.2), a row without its files would be worse.
+        try { await storage.DeletePrefixAsync(PrefixRegex().Match(asset.StorageKey).Value, ct); } catch (Amazon.S3.AmazonS3Exception) { }
+    }
+
+    /// <summary>
+    /// The tileset.json of a model (<paramref name="path"/>: a nested tileset of the package) with signed content URLs.
+    /// </summary>
+    public async Task<JsonObject> TilesetAsync(long id, string? path, string apiBase, CancellationToken ct)
+    {
+        var asset = await GetAsync(id, ct);
+        var lifetime = TimeSpan.FromMinutes(storageOptions.Value.TileUrlMinutes);
+        var site = await db.Sites.AsNoTracking().FirstAsync(s => s.Id == asset.SiteId, ct);
+        if (asset.Kind == "gltf")
+        {
+            if (path is not null) throw AppException.NotFound("model.not_found", "A GLB model has no nested tilesets.");
+            var placement = PlacementOf(asset) ?? new ModelPlacement(site.RefPoint.X, site.RefPoint.Y, 0, 0);
+            return GlbTileset(storage.PresignGet(asset.StorageKey, lifetime), placement, site.BaseHeightM);
+        }
+
+        var prefix = PrefixRegex().Match(asset.StorageKey).Value;
+        var relative = path is null ? TilesetFile : ValidPath(path);
+        if (!relative.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            throw AppException.NotFound("model.not_found", "Not a tileset.");
+        var tileset = await ReadTilesetAsync(prefix + relative, ct);
+        var directory = relative.Contains('/') ? relative[..(relative.LastIndexOf('/') + 1)] : "";
+        RewriteTile(tileset["root"] as JsonObject, uri =>
+        {
+            if (Uri.TryCreate(uri, UriKind.Absolute, out _)) return uri; // http(s): or data: stays as it is
+            var resolved = Resolve(directory, uri);
+            return resolved.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                ? $"{apiBase}/models/{id}/tileset.json?path={Uri.EscapeDataString(resolved)}"
+                : storage.PresignGet(prefix + resolved, lifetime);
+        });
+        return tileset;
+    }
+
+    private async Task<JsonObject> ReadTilesetAsync(string key, CancellationToken ct)
+    {
+        var size = await storage.SizeAsync(key, ct) ?? throw AppException.NotFound("model.not_found", "Tileset not found.");
+        if (size > MaxTilesetBytes) throw AppException.BadRequest("model.invalid_tileset", "tileset.json is too large.");
+        await using var stream = await storage.OpenReadAsync(key, ct);
+        try
+        {
+            var tileset = (await JsonNode.ParseAsync(stream, cancellationToken: ct))?.AsObject()
+                ?? throw new JsonException();
+            if (tileset["root"] is not JsonObject root) throw new JsonException();
+            // Implicit tiling uses URI templates, which cannot be signed one by one.
+            if (HasImplicitTiling(root))
+                throw AppException.BadRequest("model.implicit_tiling", "Implicit tiling is not supported; export explicit tiles.");
+            return tileset;
+        }
+        catch (Exception e) when (e is JsonException or InvalidOperationException)
+        {
+            throw AppException.BadRequest("model.invalid_tileset", "tileset.json is not a valid 3D Tiles tileset.");
+        }
+    }
+
+    private static bool HasImplicitTiling(JsonObject tile) =>
+        tile["implicitTiling"] is not null || (tile["children"] as JsonArray ?? []).OfType<JsonObject>().Any(HasImplicitTiling);
+
+    /// <summary>content.uri (3D Tiles 1.0 also content.url) and contents[].uri of every tile.</summary>
+    private static void RewriteTile(JsonObject? tile, Func<string, string> rewrite)
+    {
+        if (tile is null) return;
+        var contents = new List<JsonObject>();
+        if (tile["content"] is JsonObject content) contents.Add(content);
+        contents.AddRange((tile["contents"] as JsonArray ?? []).OfType<JsonObject>());
+        foreach (var c in contents)
+            foreach (var name in new[] { "uri", "url" })
+                if (c[name]?.GetValue<string>() is { } uri) c[name] = rewrite(uri);
+        foreach (var child in (tile["children"] as JsonArray ?? []).OfType<JsonObject>()) RewriteTile(child, rewrite);
+    }
+
+    /// <summary>A relative URI of the package against the directory of its tileset; never leaves the package.</summary>
+    private static string Resolve(string directory, string uri)
+    {
+        var clean = Uri.UnescapeDataString(uri.Split('?', '#')[0]);
+        var parts = new List<string>(directory.Split('/', StringSplitOptions.RemoveEmptyEntries));
+        foreach (var segment in clean.Split('/'))
+        {
+            if (segment is "" or ".") continue;
+            if (segment == "..")
+            {
+                if (parts.Count == 0) throw AppException.BadRequest("model.invalid_tileset", "A tile points outside the package.");
+                parts.RemoveAt(parts.Count - 1);
+            }
+            else parts.Add(segment);
+        }
+        return string.Join('/', parts);
+    }
+
+    /// <summary>
+    /// One-tile tileset for a GLB. The root transform is the east-north-up frame at the placement point turned by the
+    /// heading; Cesium turns the glTF y-up content to z-up, so glTF −Z points to the heading, +Y up.
+    /// </summary>
+    internal static JsonObject GlbTileset(string contentUrl, ModelPlacement placement, double baseHeightM)
+    {
+        var transform = Geodesy.EnuTransform(placement.Lon, placement.Lat, baseHeightM + placement.HeightM, placement.HeadingDeg);
+        return new JsonObject
+        {
+            ["asset"] = new JsonObject { ["version"] = "1.1" },
+            ["geometricError"] = 500,
+            ["root"] = new JsonObject
+            {
+                ["transform"] = new JsonArray(transform.Select(v => (JsonNode)JsonValue.Create(Math.Round(v, 6))!).ToArray()),
+                // Generous bound: the GLB is not opened here (its bytes stay in the store); it only affects culling.
+                ["boundingVolume"] = new JsonObject { ["sphere"] = new JsonArray(0, 0, 0, 500) },
+                ["geometricError"] = 0,
+                ["refine"] = "ADD",
+                ["content"] = new JsonObject { ["uri"] = contentUrl },
+            },
+        };
+    }
+
+    public static ModelPlacement? PlacementOf(ModelAsset asset) =>
+        asset.Attrs.RootElement.TryGetProperty("placement", out var p) && p.ValueKind == JsonValueKind.Object
+            ? new ModelPlacement(p.GetProperty("lon").GetDouble(), p.GetProperty("lat").GetDouble(), p.GetProperty("height_m").GetDouble(),
+                p.GetProperty("heading_deg").GetDouble())
+            : null;
+
+    public static string? AttrString(ModelAsset asset, string name) =>
+        asset.Attrs.RootElement.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    private static JsonObject PlacementNode(ModelPlacement p)
+    {
+        if (p.Lon is < -180 or > 180 || p.Lat is < -90 or > 90 || double.IsNaN(p.HeightM) || Math.Abs(p.HeightM) > 10000 || double.IsNaN(p.HeadingDeg))
+            throw AppException.BadRequest("model.invalid_placement", "placement: lon −180…180, lat −90…90, heightM (m above the site base), headingDeg.");
+        return new JsonObject
+        {
+            ["lon"] = p.Lon, ["lat"] = p.Lat, ["height_m"] = p.HeightM, ["heading_deg"] = ((p.HeadingDeg % 360) + 360) % 360,
+        };
+    }
+
+    private static string ValidPath(string? path)
+    {
+        var p = (path ?? "").Replace('\\', '/');
+        var segments = p.Split('/');
+        if (p.Length is 0 or > 512 || p.StartsWith('/') || segments.Any(s => s is "" or "." or ".." || s.Any(char.IsControl)))
+            throw AppException.BadRequest("model.invalid_files", $"Invalid file path: {path}");
+        return p;
+    }
+
+    private static bool IsGlb(string path) => path.EndsWith(".glb", StringComparison.OrdinalIgnoreCase);
+
+    private static string ContentTypeOf(string path) => Path.GetExtension(path).ToLowerInvariant() switch
+    {
+        ".json" => "application/json",
+        ".glb" => "model/gltf-binary",
+        ".gltf" => "model/gltf+json",
+        ".png" => "image/png",
+        ".jpg" or ".jpeg" => "image/jpeg",
+        ".ktx2" => "image/ktx2",
+        ".webp" => "image/webp",
+        _ => "application/octet-stream", // b3dm, i3dm, pnts, cmpt, subtree, bin
+    };
+
+    private async Task RequireSiteAsync(long siteId, CancellationToken ct)
+    {
+        if (!await db.Sites.AnyAsync(s => s.Id == siteId, ct))
+            throw AppException.NotFound("site.not_found", $"Site {siteId} not found.");
+    }
+
+    private async Task RequireNodeAsync(long nodeId, long siteId, CancellationToken ct)
+    {
+        var nodeSite = await db.Nodes.Where(n => n.Id == nodeId).Select(n => (long?)n.SiteId).FirstOrDefaultAsync(ct)
+            ?? throw AppException.NotFound("node.not_found", $"Node {nodeId} not found.");
+        if (nodeSite != siteId) throw AppException.BadRequest("model.other_site", "The node is on another site.");
+    }
+}

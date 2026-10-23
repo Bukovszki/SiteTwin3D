@@ -1,0 +1,22 @@
+# Development only: a local GeoServer standing in for MapManager (CLAUDE.md: until MapManager's service token exists).
+# The API reaches it like MapManager ({mapmanager_url}/geoserver/wms); a sample floorplan stored in EOV (EPSG:23700)
+# is published by deploy/dev/geoserver-sample.sh.
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.dev-geoserver.yml up -d
+services:
+  geoserver:
+    image: ${GEOSERVER_IMAGE:-docker.osgeo.org/geoserver:3.0.1}
+    environment:
+      SKIP_DEMO_DATA: "true"
+      GEOSERVER_ADMIN_USER: admin
+      GEOSERVER_ADMIN_PASSWORD: ${GEOSERVER_ADMIN_PASSWORD:-geoserver}
+      CORS_ENABLED: "false"
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [backend]
+  api:
+    environment:
+      # The demo organization's "MapManager" token reference (any value: the local GeoServer ignores it).
+      MapManager__Tokens__dev: dev-token

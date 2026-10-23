@@ -1,0 +1,9 @@
+# Shared rules (each project has its own .gitignore in its folder)
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Deployment: secrets and backups
+deploy/.env
+deploy/backups/

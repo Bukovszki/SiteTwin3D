@@ -1,0 +1,22 @@
+# Local (developer machine) additions to docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+# - UI at https://localhost:8543 (Caddy's own local certificate: DOMAIN=localhost in .env); no 80/443, so it does
+#   not clash with MapManager (which uses 8443 locally);
+# - the database is reachable from the host on 127.0.0.1:5433 (for `dotnet run` and QGIS), next to MapManager's 5432;
+# - the S3 endpoint on 127.0.0.1:8333.
+services:
+  web:
+    ports: !override
+      - "8543:443"
+  db:
+    ports:
+      - "127.0.0.1:5433:5432"
+  storage:
+    ports:
+      - "127.0.0.1:8333:8333"
+    # Podman (SELinux): shared label on the volume content so a recreated container can read it.
+    volumes:
+      - objects:/data:z
+  api:
+    volumes:
+      - dpkeys:/data/keys:z

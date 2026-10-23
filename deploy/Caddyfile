@@ -1,0 +1,54 @@
+# Caddy: HTTPS (automatic Let's Encrypt certificate for DOMAIN; local certificate for localhost), serves the UI,
+# forwards /api and /health to the API. Redirects HTTP to HTTPS.
+{
+	email {$ACME_EMAIL}
+	servers {
+		# WMS requests (GET) with many layers and filters can be long (spec 4.3).
+		max_header_size 64KB
+	}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	@backend path /api/* /health
+	handle @backend {
+		reverse_proxy api:8080
+	}
+
+	# Object store (panoramas, models) through short-lived signed URLs made by the API. The path is the bucket and
+	# the Host header goes through unchanged, so the S3 signature stays valid; same origin, so no CORS.
+	handle /objects/* {
+		reverse_proxy storage:8333
+	}
+
+	# The UI entry point (index.html and every route falling back to it) must always revalidate, so after an update
+	# the browser does not keep the old build. Other files have content hashes (or are Cesium assets) and may be cached.
+	@entry {
+		not path /api/* /health /objects/*
+		not path_regexp \.[A-Za-z0-9]+$
+	}
+	header @entry Cache-Control no-cache
+	@indexfile path /index.html
+	header @indexfile Cache-Control no-cache
+
+	# Angular single-page app: unknown routes fall back to index.html.
+	handle {
+		root * /srv
+		try_files {path} {path}/index.html /index.html
+		file_server
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

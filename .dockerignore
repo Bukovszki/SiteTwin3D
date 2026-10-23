@@ -1,0 +1,9 @@
+# Build context of the API image is the repository root (backend/Dockerfile); the web image uses frontend/.
+**/bin/
+**/obj/
+**/node_modules/
+backend/tests/
+frontend/
+deploy/
+docs/
+.git/

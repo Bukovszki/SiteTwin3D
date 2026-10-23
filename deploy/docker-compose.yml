@@ -1,0 +1,128 @@
+# Full deployment on one Linux server (Docker Compose v2), following the MapManager deployment pattern.
+#
+#   internet ──443/80──▶ web (Caddy: HTTPS, Angular UI)
+#                          ├─ /api/*, /health ─▶ api (.NET) ─▶ db (PostgreSQL + PostGIS + ltree)
+#                          │                               └─▶ storage (S3, metadata only; NFR-3)
+#                          └─ /objects/* (signed URLs) ─▶ storage
+#
+# Only web is reachable from outside. Settings: .env (template: .env.example).
+# Start: docker compose up -d --build   (local machine: see docker-compose.local.yml)
+
+name: twin
+
+# Container logs (docker logs) are capped at 3 × 20 MB per service.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "3"
+
+services:
+  db:
+    logging: *logging
+    # Multi-arch PostGIS image (also on Apple Silicon); ltree is part of the PostgreSQL contrib modules.
+    image: ${POSTGIS_IMAGE:-docker.io/kartoza/postgis:16-3.4}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASS: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DBNAME: appdb
+      # Password authentication from the internal compose network.
+      ALLOW_IP_RANGE: 0.0.0.0/0
+      PASSWORD_AUTHENTICATION: scram-sha-256
+    shm_size: 1g
+    volumes:
+      # The kartoza image writes under /var/lib/postgresql/16/main.
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -U $${POSTGRES_USER:-postgres} -d appdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks: [backend]
+
+  storage:
+    logging: *logging
+    # S3-compatible object store. MinIO no longer publishes free container images, so SeaweedFS is the default;
+    # any S3-compatible server can replace it (the API only speaks S3).
+    image: ${STORAGE_IMAGE:-docker.io/chrislusf/seaweedfs:4.48}
+    restart: unless-stopped
+    # 1 GB volumes (the default 30 GB would not fit on a small disk: "no free volumes left"), at most STORAGE_MAX_VOLUMES.
+    command: server -dir=/data -s3 -ip.bind=0.0.0.0 -master.volumeSizeLimitMB=1024 -volume.max=${STORAGE_MAX_VOLUMES:-100}
+    environment:
+      # The S3 admin identity (the API uses it to sign URLs).
+      AWS_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY:?Set STORAGE_ACCESS_KEY in .env}
+      AWS_SECRET_ACCESS_KEY: ${STORAGE_SECRET_KEY:?Set STORAGE_SECRET_KEY in .env}
+    volumes:
+      - objects:/data
+    # web (Caddy) forwards the signed URLs (/media/*) to it.
+    networks: [backend, frontend]
+
+  api:
+    logging: *logging
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    image: twin-api:latest
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Database: Host=db;Port=5432;Database=appdb;Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD}
+      Database__MigrateOnStartup: "true"
+      # The first platform admin (only if none exists; password change at first sign-in, organization = "platform").
+      Platform__AdminUsername: ${PLATFORM_ADMIN_USER:-admin}
+      Platform__AdminPassword: ${PLATFORM_ADMIN_PASSWORD:?Set PLATFORM_ADMIN_PASSWORD in .env}
+      Storage__Endpoint: http://storage:8333
+      Storage__AccessKey: ${STORAGE_ACCESS_KEY}
+      Storage__SecretKey: ${STORAGE_SECRET_KEY}
+      # The address the browser uses (signed URLs point here; Caddy forwards /objects/* to the object store).
+      Storage__PublicUrl: ${PUBLIC_URL:?Set PUBLIC_URL in .env}
+      Storage__MaxPanoramaMb: ${MAX_PANORAMA_MB:-300}
+      Storage__MaxModelMb: ${MAX_MODEL_MB:-4096}
+      # Service tokens of organizations' MapManager connections: MapManager__Tokens__<ref>=mmst_… (spec 6.3)
+      # Behind Caddy: HTTPS is known from X-Forwarded-Proto (the API is not exposed).
+      ReverseProxy__TrustForwardedHeaders: "true"
+      DataProtection__KeysPath: /data/keys
+    volumes:
+      - dpkeys:/data/keys
+    depends_on:
+      db:
+        condition: service_healthy
+      storage:
+        condition: service_started
+    networks: [backend, frontend]
+
+  web:
+    logging: *logging
+    build: ../frontend
+    image: twin-web:latest
+    restart: unless-stopped
+    environment:
+      # The server's DNS name; Caddy requests a Let's Encrypt certificate for it (localhost: local certificate).
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+      # Let's Encrypt sends notices here (e.g. expiring certificate). Required by the Caddyfile syntax.
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [frontend]
+
+networks:
+  # db and storage are only on the backend network: web (the internet-facing side) cannot reach them.
+  backend:
+  frontend:
+
+volumes:
+  pgdata:
+  objects:
+  dpkeys:
+  caddy_data:
+  caddy_config:
