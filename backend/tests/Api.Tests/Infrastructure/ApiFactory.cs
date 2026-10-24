@@ -18,6 +18,9 @@ public sealed class ApiFactory(PostgisFixture postgis) : WebApplicationFactory<P
 
     public FakeGeoServer GeoServer { get; } = new();
 
+    /// <summary>Stands in for the converter service (ModelConversionTests).</summary>
+    public FakeConverter Converter { get; } = new();
+
     /// <summary>Replaces the ONNX face detector when set before the first request.</summary>
     public Api.Services.Panoramas.IFaceDetector? FaceDetector { get; set; }
 
@@ -34,11 +37,13 @@ public sealed class ApiFactory(PostgisFixture postgis) : WebApplicationFactory<P
         // Tests drive the panorama worker step by step (PanoramaTests.ProcessAllAsync).
         builder.UseSetting("Privacy:RunWorker", "false");
         builder.UseSetting("Cleanup:RunWorker", "false");
+        builder.UseSetting("Converter:RunWorker", "false");
         builder.ConfigureTestServices(services =>
         {
             if (FaceDetector is { } detector) services.AddSingleton(detector);
             services.AddHttpClient(OutboundHttp.MapManagerClientName).ConfigurePrimaryHttpMessageHandler(() => GeoServer);
             services.AddHttpClient(OutboundHttp.ExternalWmsClientName).ConfigurePrimaryHttpMessageHandler(() => GeoServer);
+            services.AddHttpClient(Api.Services.Models.ConverterOptions.ClientName).ConfigurePrimaryHttpMessageHandler(() => Converter);
         });
     }
 }

@@ -228,7 +228,7 @@ export class Workspace {
   protected readonly selection = inject(SelectionService);
   protected readonly version = APP_VERSION;
 
-  protected readonly center = signal<'map' | 'globe'>('map');
+  protected readonly center = this.selection.centerView;
   protected readonly sitesOpen = signal(false);
   protected readonly layersOpen = signal(false);
   protected readonly usersOpen = signal(false);

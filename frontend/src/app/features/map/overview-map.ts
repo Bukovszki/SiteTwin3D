@@ -20,9 +20,11 @@ import { Select } from 'primeng/select';
 import { Tooltip } from 'primeng/tooltip';
 import { AnchorEditService } from '../../core/anchors/anchor-edit.service';
 import { ApiService, floorplanWmsUrl, wmsProxyUrl } from '../../core/api/api.service';
-import { Anchor, LevelInfo, MapLayer, Panorama, Site } from '../../core/api/models';
+import { Anchor, LevelInfo, MapLayer, Panorama, Place, Site } from '../../core/api/models';
 import { AuthService } from '../../core/auth/auth.service';
 import { destination } from '../../core/geo/geodesy';
+import { LocalPlane } from '../../core/geo/snap';
+import { fromBoxFrame } from '../../viewer3d/box-math';
 import { DrawPanel } from '../drawing/draw-panel';
 import { PanoramaUploadDialog } from '../panorama/panorama-upload-dialog';
 import { FloorplansDialog } from './floorplans-dialog';
@@ -181,7 +183,11 @@ export class OverviewMap {
   private readonly floorplanLayers: ImageLayer<ImageWMS>[] = [];
   private readonly panoramaSource = new VectorSource<Feature<Geometry>>();
   private readonly coneSource = new VectorSource<Feature<Geometry>>();
+  /** One marker per node: its place (user decision: one element, one place). */
   private readonly anchorSource = new VectorSource<Feature<Geometry>>();
+  /** The boxes of the level as areas (rooms, equipment outlines). */
+  private readonly footprintSource = new VectorSource<Feature<Geometry>>();
+  private focusPending = false;
   private readonly linkSource = new VectorSource<Feature<Geometry>>();
   private translate?: Translate;
   private shownLevel: number | null | undefined;
@@ -236,11 +242,19 @@ export class OverviewMap {
         this.loadLinks(open);
       });
     });
+    // The selected node with its subtree (e.g. a process line) is highlighted: markers and box areas.
+    effect(() => {
+      const ids = this.selection.highlightIds();
+      untracked(() => {
+        for (const source of [this.anchorSource, this.footprintSource])
+          source.getFeatures().forEach((f) => f.set('selected', ids.has(f.get('nodeId') as number)));
+      });
+    });
+    // Selected or focused anywhere: the map goes to the node's place (its level too).
     effect(() => {
       const nodeId = this.selection.nodeId();
       this.selection.focusTick();
       untracked(() => {
-        this.anchorSource.getFeatures().forEach((f) => f.set('selected', f.get('nodeId') === nodeId));
         if (nodeId != null) this.showNodeAnchors(nodeId);
       });
     });
@@ -283,28 +297,59 @@ export class OverviewMap {
     const changedLevel = levelId !== this.shownLevel;
     this.shownLevel = levelId;
     this.anchorSource.clear();
-    this.api.levelAnchors(siteId, levelId).subscribe((anchors) => {
+    this.footprintSource.clear();
+    this.api.places(siteId, levelId).subscribe((places) => {
       if (this.selection.levelId() !== levelId) return;
       this.anchorSource.clear();
-      this.anchorSource.addFeatures(anchors.map((a) => this.anchorFeature(a)));
+      this.anchorSource.addFeatures(places.map((p) => this.placeFeature(p)));
+    });
+    this.api.levelAnchors(siteId, levelId).subscribe((anchors) => {
+      if (this.selection.levelId() !== levelId) return;
+      this.footprintSource.clear();
+      this.footprintSource.addFeatures(anchors.filter((a) => a.regionShape === 'box').map((a) => this.footprintFeature(a)));
     });
     this.api.panoramas(siteId, levelId).subscribe((panoramas) => {
       if (this.selection.levelId() !== levelId) return;
       this.panoramaSource.clear();
       this.panoramaSource.addFeatures(panoramas.map((p) => this.panoramaFeature(p)));
       // Choosing a level zooms to its panoramas (the floorplan is around them).
-      if (changedLevel && levelId != null && panoramas.length > 0 && this.selection.panoramaId() == null)
+      const focusing = this.focusPending;
+      this.focusPending = false;
+      if (changedLevel && !focusing && levelId != null && panoramas.length > 0 && this.selection.panoramaId() == null)
         this.map?.getView().fit(this.panoramaSource.getExtent(), { padding: [80, 80, 80, 80], maxZoom: 21, duration: 300 });
     });
   }
 
-  private anchorFeature(a: Anchor): Feature<Geometry> {
-    const feature = new Feature<Geometry>(new Point(fromLonLat(a.position.coordinates)));
-    feature.setProperties({ anchorId: a.id, nodeId: a.nodeId, name: a.nodeName, kind: a.kind, selected: a.nodeId === this.selection.nodeId() });
+  private placeFeature(p: Place): Feature<Geometry> {
+    const feature = new Feature<Geometry>(new Point(fromLonLat(p.position.coordinates)));
+    feature.setProperties({ anchorId: p.anchorId, nodeId: p.nodeId, name: p.nodeName, kind: p.source, selected: this.selection.highlightIds().has(p.nodeId) });
     return feature;
   }
 
-  /** Anchor markers (FR-AR1b): diamond for info points, square for points; the selected node's ones highlighted. */
+  /** A box as its (turned) rectangle on the floorplan, in real metres around its centre. */
+  private footprintFeature(a: Anchor): Feature<Geometry> {
+    const [lon, lat] = a.position.coordinates;
+    const plane = new LocalPlane(lon, lat);
+    const [hx, hy] = [(a.sizeX ?? 1) / 2, (a.sizeY ?? 1) / 2];
+    const ring = [[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy], [-hx, -hy]].map(([x, y]) => {
+      const [e, n] = fromBoxFrame(a.headingDeg ?? 0, x, y, 0);
+      return fromLonLat(plane.toLonLat(e, n));
+    });
+    const feature = new Feature<Geometry>(new Polygon([ring]));
+    feature.setProperties({ nodeId: a.nodeId, name: a.nodeName, area: (a.sizeX ?? 1) * (a.sizeY ?? 1), selected: this.selection.highlightIds().has(a.nodeId) });
+    return feature;
+  }
+
+  private footprintStyle(feature: Feature<Geometry>): Style {
+    const selected = feature.get('selected') as boolean;
+    return new Style({
+      fill: new Fill({ color: selected ? 'rgba(250, 204, 21, 0.28)' : 'rgba(37, 99, 235, 0.04)' }),
+      stroke: new Stroke({ color: selected ? '#ca8a04' : 'rgba(71, 85, 105, 0.7)', width: selected ? 2.5 : 1, lineDash: selected ? undefined : [4, 3] }),
+      zIndex: selected ? 2 : 1,
+    });
+  }
+
+  /** One marker per node (FR-AR1b): diamond if its place is only an info point's; the selected node (subtree) highlighted. */
   private anchorStyle(feature: Feature<Geometry>): Style {
     const selected = feature.get('selected') as boolean;
     return new Style({
@@ -325,11 +370,14 @@ export class OverviewMap {
    * of its first anchor (spec 1.5: "if the element has a floorplan appearance, it shows on the floorplan").
    */
   private showNodeAnchors(nodeId: number): void {
-    this.api.nodeAnchors(nodeId).subscribe((anchors) => {
-      if (this.selection.nodeId() !== nodeId || anchors.length === 0) return;
-      const here = anchors.find((a) => a.levelId === this.selection.levelId()) ?? anchors[0];
-      if (here.levelId !== this.selection.levelId()) this.selection.levelId.set(here.levelId);
-      this.map?.getView().animate({ center: fromLonLat(here.position.coordinates), duration: 300 });
+    this.api.place(nodeId).subscribe((place) => {
+      if (this.selection.nodeId() !== nodeId || !place) return;
+      if (place.levelId !== this.selection.levelId()) {
+        // The level change must not zoom to the level's panoramas: the map goes to the node.
+        this.focusPending = true;
+        this.selection.levelId.set(place.levelId);
+      }
+      this.map?.getView().animate({ center: fromLonLat(place.position.coordinates), duration: 300 });
     });
   }
 
@@ -398,6 +446,7 @@ export class OverviewMap {
           style: new Style({ stroke: new Stroke({ color: '#2563eb', width: 2, lineDash: [6, 4] }) }),
         }),
         new VectorLayer({ source: this.panoramaSource, style: (f) => this.panoramaStyle(f as Feature<Geometry>), zIndex: 120 }),
+        new VectorLayer({ source: this.footprintSource, style: (f) => this.footprintStyle(f as Feature<Geometry>), zIndex: 110 }),
         new VectorLayer({ source: this.anchorSource, style: (f) => this.anchorStyle(f as Feature<Geometry>), zIndex: 125 }),
         new VectorLayer({
           source: this.highlightSource,
@@ -431,11 +480,17 @@ export class OverviewMap {
       if (tool) return;
       const anchor = this.map!.forEachFeatureAtPixel(event.pixel, (f) => f, { layerFilter: (l) => l.getSource() === this.anchorSource });
       if (anchor) {
-        this.selection.selectNode(anchor.get('nodeId') as number);
+        this.selection.focusNode(anchor.get('nodeId') as number, true);
         return;
       }
       if (panorama) {
         this.selection.openPanorama(panorama.get('panoramaId') as number);
+        return;
+      }
+      // Inside box areas: the smallest one (as in 3D, FR-A3b).
+      const area = this.footprintSource.getFeaturesAtCoordinate(event.coordinate).sort((a, b) => a.get('area') - b.get('area'))[0];
+      if (area) {
+        this.selection.focusNode(area.get('nodeId') as number, true);
         return;
       }
       const feature = this.map!.forEachFeatureAtPixel(event.pixel, (f) => f, { layerFilter: (l) => l.getSource() === this.sitesSource });
@@ -448,6 +503,8 @@ export class OverviewMap {
       // session (AnchorEditService) – a stray drag never moves an anchor.
       this.translate = new Translate({
         layers: (l) => (l.getSource() === this.panoramaSource && this.can.prepare()) || (l.getSource() === this.anchorSource && this.edits.active()),
+        // A marker moves its point or info-point place; a place from a box or model element is moved in 3D.
+        filter: (f) => f.get('anchorId') == null || f.get('kind') === 'point' || f.get('kind') === 'panorama_point',
         hitTolerance: 4,
       });
       let start: number[] = [];
@@ -458,7 +515,7 @@ export class OverviewMap {
         const pixelsMoved = Math.hypot(event.coordinate[0] - start[0], event.coordinate[1] - start[1]) / this.map!.getView().getResolution()!;
         const anchorId = feature.get('anchorId') as number | undefined;
         if (pixelsMoved < 3) {
-          if (anchorId != null) this.selection.selectNode(feature.get('nodeId') as number);
+          if (anchorId != null) this.selection.focusNode(feature.get('nodeId') as number, true);
           else if (this.tools.tool()?.kind === 'panorama') this.pickedPanorama(feature.get('panoramaId') as number);
           else this.selection.openPanorama(feature.get('panoramaId') as number);
           return;

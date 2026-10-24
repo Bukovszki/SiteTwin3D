@@ -21,6 +21,7 @@ Ipari telephelyek digitális ikre: 360°-os panorámabejárás, alaprajz és (k�
 ```
 backend/     ← .NET API (src/Api, tests/Api.Tests; Backend.slnx)
 frontend/    ← Angular kliens (zoneless; a Cesium lusta betöltésű, viewer3d/)
+converter/   ← modellkonverter (Python: IFC → szegmentált GLB, mesh → GLB, LAS/LAZ/E57 → 3D Tiles), belső szolgáltatás
 db/sql/      ← migrációk által futtatott SQL (triggerek, alaptípusok); beágyazott erőforrás, `SqlScripts.Load`
 deploy/      ← docker-compose.yml, .env.example, Caddyfile, backup.sh / restore.sh
 docs/        ← SPECIFICATION.md, MAPMANAGER_EXTENSIONS.md, OPERATIONS.md (üzemeltetés)
@@ -34,9 +35,13 @@ docs/        ← SPECIFICATION.md, MAPMANAGER_EXTENSIONS.md, OPERATIONS.md (üze
 - Panorámák (FR-P8): feldolgozási sor = a `panorama.privacy_status` (pending → review → rendering → approved | failed), háttérfeladat: `PanoramaWorker`. Arcfelismerés helyben: UltraFace RFB-640 ONNX (`backend/models/`, MIT), SkiaSharp (MIT) – ImageSharpot ne használj (licenc). A régiók képi szögekben (yaw 0 = képközép) vannak, a tájolástól függetlenül. A rendszámkeresés még nincs kész.
 - Horgonyok (FR-A): az 1. fázisban `point` és `panorama_point` (infopont: képi yaw/pitch + közelítő hely az alaprajzon; alaprajz nélkül a panoráma helye, `attrs.position_source = panorama_fallback`). M6 óta `region`/`box` is (doboz: középpont = `position` + `z_rel_m`, méretek méterben, tájolás északtól; a 3D-ben osztályozó térfogattal kiemelve, kattintáskor a legkisebb tartalmazó doboz nyer). M7 óta `model_feature` is (a stabil `element_id`, a modell `attrs.element_id_property` tulajdonsága szerint; egy elem egy rekordé). A sokszöghasáb még nincs kész.
 - Tártakarítás (M9): `Services/Storage/StorageJanitor` – az adatbázis által hivatkozott kulcsok (panoráma eredeti/megjelenítési kulcs, modellcsomag mappája) kivételével minden `org/` alatti fájl árva a türelmi idő után. Új fájltípusnál a hivatkozást itt is fel kell venni, különben a takarítás törli!
+- Helyszíni fa: a funkcionális levelek (berendezések) a helyük alatt is megjelennek (`TreePanel.addPlaced`, típus `placed`; csoport `folder`); a PrimeNG fa a sablont a csomópont `type` mezője szerint választja, ezért minden típusnak kell `pTemplate`. A fa `droppableNodes`-a mindig igaz (különben a PrimeNG nem iratkozik fel a húzásra), a módot a `drop()` ellenőrzi.
+- Adatok fa (`TreePanel`, nézet `data`; a `selection.aspect` ilyenkor `location`): a helyszíni fa + panorámák (`pano:<id>`) és modellek (`model:<id>`) a `node_id`-juk szerint. Kattintás: `selection.focusPanorama` / `focusModel` (a középső fül a `selection.centerView`); a csomópont-kijelölés nem változik. A GLB-modell egycsempés tilesetjének gömbje szándékosan bő (500 m), a ráugrás a betöltött tartalom gömbjét használja (`_model`, típusdefiníción kívül; Cesium-frissítés után ellenőrizni).
 - Funkcionális nézőpont (M8): a csomópont helye `located_in` (egy, explicit) vagy a legkisebb tartalmazó helyszíni doboz (`Services/Locations`); a kijelölt csomópont részfáját a `SelectionService.members`/`highlightIds` tölti be egy helyen, ezt használja a 3D-nézet és az adatlap.
 - Illesztés 3D-ben: `core/geo/snap.ts` (helyi sík valós méterben, csúcs > él), forrás: `GET /sites/{id}/floors/{levelId}/geometry` (rajzi rétegek + MapManager WFS). A Cesiumban a modellelem kiválasztásához `drillPick` kell (a dobozok osztályozó térfogata eltakarja), és a `pickPosition`-t előtte kell hívni.
 - Időbeli relevancia: véglegesített csomópont (`node.finalized_at`) leíró adatainak és horgonyainak minden változása indoklással és érvényességi nappal a `change_entry`-be kerül – központilag az `AppDbContext.SaveChangesAsync`-ban (`Data/AppDbContext.History.cs`). Ezért horgonyt/csomópontot **ne** módosíts vagy törölj `ExecuteUpdate`/`ExecuteDelete`-tel (megkerülné); kaszkádoló törlés előtt `RemoveFinalizedAnchorsAsync`. A felületen a 428-at a `changeReasonInterceptor` kezeli (indoklás bekérése, ismétlés).
+- Modellátalakítás (spec 9.2): az API csak feladatot ad a `converter` szolgáltatásnak (`ModelConversionWorker`, `Converter:Url`); a konverter S3-ból olvas és oda ír. Új formátumnál a felismerés két helyen van: `ModelFormats.Detect` (backend) és `detectFormat` (`models-dialog.ts`). Licenc: IfcOpenShell LGPL – csak változtatás nélkül, külön programként.
+- Egy elem – egy megjelenés: elemenként egy pont, panorámánként egy infopont (egyedi index; az `AnchorService.CreateAsync` újra lerakáskor áthelyez), egyetlen hely (`PlaceView`: modellelem/doboz → pont → infopont). A nézetek kattintásai `selection.focusNode(id, true)`-t hívnak (grafikus nézet: a panoráma is követ), a fa és a grid `focusNode(id)`-t.
 - Horgonyok áthelyezése csak munkamenetben: `core/anchors/anchor-edit.service.ts` (indítás, függő módosítások, Mentés/Elvetés). Új húzható horgonyfelületnél a húzást itt kell „stage”-elni, nem azonnal menteni.
 - Bejárás: a szomszédság kézi kapcsolat (`panorama_link`, mindkét irányban); az automatikus összekötés csak javaslat (legközelebbiek `geography`-távolsággal), utána kézzel javítható.
 - Rajzi rétegek: szerkesztés EPSG:3857-ben, tárolás WGS84-ben (`Services/Drawing/WebMercator.cs`, pontos képlet); egy rekordhoz itt egy geometria tartozik.
@@ -127,4 +132,7 @@ cd deploy && COMPOSE="docker-compose -f docker-compose.yml -f docker-compose.loc
 # A futó compose stack API-jához: API_URL=https://localhost:8543 npm start
 cd frontend && npm start
 cd frontend && npx ng test --watch=false
+# Konverter tesztjei (generált IFC, OBJ, LAS, E57 mintákon), a képben:
+podman build -f converter/Dockerfile -t twin-converter . && podman run --rm twin-converter python -m tests.test_convert
+# A pye57 C++ fordítása sok memóriát kér: a Podman VM-en a konvertert külön (nem párhuzamosan) építsd.
 ```

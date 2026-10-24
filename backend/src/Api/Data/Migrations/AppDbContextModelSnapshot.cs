@@ -124,6 +124,11 @@ namespace Api.Data.Migrations
                     b.HasKey("Id")
                         .HasName("pk_anchor");
 
+                    b.HasIndex("NodeId")
+                        .IsUnique()
+                        .HasDatabaseName("anchor_one_point")
+                        .HasFilter("kind = 'point'");
+
                     b.HasIndex("Position")
                         .HasDatabaseName("ix_anchor_position");
 
@@ -140,6 +145,11 @@ namespace Api.Data.Migrations
 
                     b.HasIndex("NodeId", "OrganizationId")
                         .HasDatabaseName("ix_anchor_node_id_organization_id");
+
+                    b.HasIndex("NodeId", "PanoramaId")
+                        .IsUnique()
+                        .HasDatabaseName("anchor_one_info_point_per_panorama")
+                        .HasFilter("kind = 'panorama_point'");
 
                     b.HasIndex("PanoramaId", "OrganizationId")
                         .HasDatabaseName("ix_anchor_panorama_id_organization_id");
@@ -673,6 +683,10 @@ namespace Api.Data.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("organization_id");
 
+                    b.Property<string>("ProcessingError")
+                        .HasColumnType("text")
+                        .HasColumnName("processing_error");
+
                     b.Property<bool>("Segmented")
                         .HasColumnType("boolean")
                         .HasDefaultValue(false)
@@ -681,6 +695,16 @@ namespace Api.Data.Migrations
                     b.Property<long>("SiteId")
                         .HasColumnType("bigint")
                         .HasColumnName("site_id");
+
+                    b.Property<string>("SourceFormat")
+                        .HasColumnType("text")
+                        .HasColumnName("source_format");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasDefaultValue("ready")
+                        .HasColumnName("status");
 
                     b.Property<string>("StorageKey")
                         .IsRequired()
@@ -693,6 +717,10 @@ namespace Api.Data.Migrations
                     b.HasAlternateKey("Id", "OrganizationId")
                         .HasName("ak_model_asset_id_organization_id");
 
+                    b.HasIndex("Status")
+                        .HasDatabaseName("model_asset_converting")
+                        .HasFilter("status = 'converting'");
+
                     b.HasIndex("NodeId", "OrganizationId")
                         .HasDatabaseName("ix_model_asset_node_id_organization_id");
 
@@ -702,6 +730,8 @@ namespace Api.Data.Migrations
                     b.ToTable("model_asset", null, t =>
                         {
                             t.HasCheckConstraint("model_asset_kind", "kind IN ('gltf', '3dtiles')");
+
+                            t.HasCheckConstraint("model_asset_status", "status IN ('ready', 'converting', 'failed')");
                         });
                 });
 

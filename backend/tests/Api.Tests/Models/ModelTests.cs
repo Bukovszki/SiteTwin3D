@@ -118,7 +118,7 @@ public sealed class ModelTests(PostgisFixture postgis) : ApiTestBase(postgis)
     {
         var (org, site) = await SiteAsync();
         var traversal = await org.Http.PostAsJsonAsync("/api/v1/uploads/model", new { siteId = site, files = new[] { new { path = "../x.glb", size = 1 } } });
-        var unknown = await org.Http.PostAsJsonAsync("/api/v1/uploads/model", new { siteId = site, files = new[] { new { path = "model.obj", size = 1 } } });
+        var unknown = await org.Http.PostAsJsonAsync("/api/v1/uploads/model", new { siteId = site, files = new[] { new { path = "model.skp", size = 1 } } });
         var tooBig = await org.Http.PostAsJsonAsync("/api/v1/uploads/model", new { siteId = site, files = new[] { new { path = "m.glb", size = 1L << 40 } } });
         var prefix = await UploadAsync(org, site, new() { ["m.glb"] = Glb });
         var noPlacement = await org.Http.PostAsJsonAsync($"/api/v1/sites/{site}/models", new { prefix, name = "M" });

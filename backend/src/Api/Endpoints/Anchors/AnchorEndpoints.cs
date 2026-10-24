@@ -23,6 +23,12 @@ public record AnchorDto(long Id, long NodeId, string NodeName, string? NodeCode,
         v.Anchor.RegionShape, v.Anchor.SizeX, v.Anchor.SizeY, v.Anchor.SizeZ, v.Anchor.HeadingDeg, v.Anchor.ModelAssetId, v.Anchor.FeatureRef);
 }
 
+public record PlaceDto(long NodeId, string NodeName, string? NodeCode, string TypeCode, string Source, long AnchorId, Point Position, long? LevelId,
+    float ZRelM)
+{
+    public static PlaceDto From(PlaceView p) => new(p.NodeId, p.NodeName, p.NodeCode, p.TypeCode, p.Source, p.AnchorId, p.Position, p.LevelId, p.ZRelM);
+}
+
 public record LinkRequest(long ToId);
 
 /// <summary>Anchors (FR-A) and the walk-through neighbourhood of panoramas (FR-P4).</summary>
@@ -32,11 +38,15 @@ public static class AnchorEndpoints
     {
         api.MapGet("/nodes/{id:long}/anchors", OfNode).WithTags("Anchors").RequireAuthorization(Policies.Member).WithSummary("Anchors of a node");
         api.MapPost("/nodes/{id:long}/anchors", Create).WithTags("Anchors").RequireAuthorization(Policies.Editor)
-            .WithSummary("New anchor: point; info point (panorama_point: panoramaId, yawDeg, pitchDeg in image angles) with its approximate place on the floorplan; box (region: sizeX/Y/Z m, headingDeg, centre = position + zRelM); model element (model_feature: modelAssetId, featureRef = stable element id)");
+            .WithSummary("New anchor (one point per node and one info point per panorama: placing again moves it): point; info point (panorama_point: panoramaId, yawDeg, pitchDeg in image angles) with its approximate place on the floorplan; box (region: sizeX/Y/Z m, headingDeg, centre = position + zRelM); model element (model_feature: modelAssetId, featureRef = stable element id)");
         api.MapGet("/panoramas/{id:long}/anchors", OfPanorama).WithTags("Anchors").RequireAuthorization(Policies.Member)
             .WithSummary("Info points of a panorama");
         api.MapGet("/sites/{siteId:long}/anchors", OfLevel).WithTags("Anchors").RequireAuthorization(Policies.Member)
             .WithSummary("Anchors of a level (levelId=…) or outdoor ones (no levelId), for the floorplan; allLevels=true: the whole site; kind=…: only that kind");
+        api.MapGet("/sites/{siteId:long}/places", Places).WithTags("Anchors").RequireAuthorization(Policies.Member)
+            .WithSummary("One place per node (model element / box → point → info point): levelId=… for a level, none for outdoor, allLevels=true: the whole site");
+        api.MapGet("/nodes/{id:long}/place", PlaceOf).WithTags("Anchors").RequireAuthorization(Policies.Member)
+            .WithSummary("The single place of a node (null: none yet)");
         api.MapPatch("/anchors/{id:long}", Update).WithTags("Anchors").RequireAuthorization(Policies.Editor)
             .WithSummary("Move an anchor (position, levelId, zRelM; info points also yawDeg, pitchDeg; boxes also sizeX/Y/Z, headingDeg)");
         api.MapDelete("/anchors/{id:long}", Delete).WithTags("Anchors").RequireAuthorization(Policies.Editor).WithSummary("Delete an anchor");
@@ -70,6 +80,15 @@ public static class AnchorEndpoints
     private static async Task<Ok<List<AnchorDto>>> OfLevel(long siteId, long? levelId, bool? allLevels, string? kind, AnchorService anchors,
         CancellationToken ct) =>
         TypedResults.Ok((await anchors.OfLevelAsync(siteId, levelId, allLevels ?? false, kind, ct)).Select(AnchorDto.From).ToList());
+
+    private static async Task<Ok<List<PlaceDto>>> Places(long siteId, long? levelId, bool? allLevels, AnchorService anchors, CancellationToken ct) =>
+        TypedResults.Ok((await anchors.PlacesAsync(siteId, levelId, allLevels ?? false, ct)).Select(PlaceDto.From).ToList());
+
+    private static async Task<Ok<PlaceDto?>> PlaceOf(long id, AnchorService anchors, CancellationToken ct)
+    {
+        await anchors.OfNodeAsync(id, ct); // 404 if the node is not visible
+        return TypedResults.Ok(await anchors.PlaceOfAsync(id, ct) is { } place ? PlaceDto.From(place) : null);
+    }
 
     private static async Task<Ok<AnchorDto>> Update(long id, JsonElement body, IOptions<JsonOptions> json, AnchorService anchors, CancellationToken ct)
     {

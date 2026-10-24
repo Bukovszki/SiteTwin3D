@@ -18,6 +18,9 @@ public static class LocationSources
     public const string Box = "box";
 }
 
+/// <summary>Where a node of the functional tree is: its place in the location tree (null: none) and how it was found.</summary>
+public record Placement(long NodeId, long? LocationId, string? Source);
+
 public record MemberLocation(long NodeId, string Name, string? Code, string TypeCode, long? ParentId, int Depth, LocationRef? Location,
     long? LevelId, string? LevelName);
 
@@ -42,8 +45,44 @@ public class LocationService(AppDbContext db, CurrentUser currentUser)
         var nodes = await db.Nodes.AsNoTracking().Include(n => n.Type)
             .Where(n => n.SiteId == root.SiteId && n.Path.IsDescendantOf(path))
             .ToListAsync(ct);
-        var ids = nodes.Select(n => n.Id).ToList();
+        var located = await LocateAsync(root.SiteId, nodes, ct);
+        MemberLocation Describe(Node node)
+        {
+            var (location, levelId, levelName) = located[node.Id];
+            return new MemberLocation(node.Id, node.Name, node.Code, node.Type.Code, node.ParentId,
+                NodeService.Depth(node.Path) - NodeService.Depth(path), location, levelId, levelName);
+        }
 
+        var members = nodes.Where(n => n.Id != root.Id)
+            .OrderBy(n => n.SortOrder).ThenBy(n => n.Name)
+            .ToList();
+        // Tree order: parents before children, siblings by sort order.
+        var ordered = new List<Node>();
+        void Walk(long parentId)
+        {
+            foreach (var child in members.Where(n => n.ParentId == parentId)) { ordered.Add(child); Walk(child.Id); }
+        }
+        Walk(root.Id);
+        return new NodeMembers(Describe(root), ordered.Select(Describe).ToList());
+    }
+
+    /// <summary>
+    /// The place of every node of the functional tree on a site (user decision: an equipment is the same record in
+    /// both trees – in the location tree it shows under its place). Null: no place yet.
+    /// </summary>
+    public async Task<List<Placement>> PlacementsAsync(long siteId, CancellationToken ct)
+    {
+        if (!await db.Sites.AnyAsync(s => s.Id == siteId, ct))
+            throw AppException.NotFound("site.not_found", $"Site {siteId} not found.");
+        var nodes = await db.Nodes.AsNoTracking().Include(n => n.Type).Where(n => n.SiteId == siteId && n.Type.Aspect == "function").ToListAsync(ct);
+        var located = await LocateAsync(siteId, nodes, ct);
+        return nodes.Select(n => new Placement(n.Id, located[n.Id].Location?.NodeId, located[n.Id].Location?.Source)).ToList();
+    }
+
+    /// <summary>Where each node is: its located_in relation (the deepest), else the smallest location box with one of its anchors.</summary>
+    private async Task<Dictionary<long, (LocationRef? Location, long? LevelId, string? LevelName)>> LocateAsync(long siteId, List<Node> nodes, CancellationToken ct)
+    {
+        var ids = nodes.Select(n => n.Id).ToList();
         // Explicit relations; with several, the most specific (deepest) place wins.
         var relations = await db.NodeRelations.AsNoTracking()
             .Where(r => r.Kind == RelationKinds.LocatedIn && ids.Contains(r.FromId))
@@ -51,13 +90,13 @@ public class LocationService(AppDbContext db, CurrentUser currentUser)
             .ToListAsync(ct);
 
         // Levels (elevation) and the boxes of location nodes on this site.
-        var levels = await db.Nodes.AsNoTracking().Where(n => n.SiteId == root.SiteId && n.Type.IsLevel).ToListAsync(ct);
+        var levels = await db.Nodes.AsNoTracking().Where(n => n.SiteId == siteId && n.Type.IsLevel).ToListAsync(ct);
         var elevation = levels.ToDictionary(l => l.Id, l => Number(l.Attrs, "elevation_m") ?? 0);
         double Elevation(long? levelId, double z) => (levelId is { } id && elevation.TryGetValue(id, out var e) ? e : 0) + z;
 
         var boxes = await db.Anchors.AsNoTracking()
             .Where(a => a.Kind == AnchorKinds.Region && a.RegionShape == RegionShapes.Box)
-            .Join(db.Nodes.Where(n => n.SiteId == root.SiteId && n.Type.Aspect == "location"), a => a.NodeId, n => n.Id, (a, n) => new { a, Location = n })
+            .Join(db.Nodes.Where(n => n.SiteId == siteId && n.Type.Aspect == "location"), a => a.NodeId, n => n.Id, (a, n) => new { a, Location = n })
             .ToListAsync(ct);
         var shapes = boxes.Select(b => (b.Location, Shape: new BoxShape(b.a.Position.X, b.a.Position.Y, Elevation(b.a.LevelId, b.a.ZRelM),
             b.a.SizeX!.Value, b.a.SizeY!.Value, b.a.SizeZ!.Value, b.a.HeadingDeg ?? 0))).ToList();
@@ -72,7 +111,8 @@ public class LocationService(AppDbContext db, CurrentUser currentUser)
         var names = await db.Nodes.AsNoTracking().Where(n => ancestorIds.Contains(n.Id)).ToDictionaryAsync(n => n.Id, n => n.Name, ct);
         List<string> Breadcrumb(Node place) => place.Path.ToString().Split('.').Select(long.Parse).Select(id => names.GetValueOrDefault(id, "?")).ToList();
 
-        MemberLocation Describe(Node node)
+        var result = new Dictionary<long, (LocationRef?, long?, string?)>();
+        foreach (var node in nodes)
         {
             LocationRef? location = null;
             var related = relations.Where(r => r.FromId == node.Id).Select(r => r.Location).OrderByDescending(n => NodeService.Depth(n.Path)).FirstOrDefault();
@@ -87,21 +127,9 @@ public class LocationService(AppDbContext db, CurrentUser currentUser)
                 if (hit is not null) location = new LocationRef(hit.Id, hit.Name, Breadcrumb(hit), LocationSources.Box);
             }
             var levelId = points[node.Id].Select(p => p.LevelId).FirstOrDefault(l => l is not null);
-            return new MemberLocation(node.Id, node.Name, node.Code, node.Type.Code, node.ParentId, NodeService.Depth(node.Path) - NodeService.Depth(path), location, levelId,
-                levelId is { } l ? levels.FirstOrDefault(x => x.Id == l)?.Name : null);
+            result[node.Id] = (location, levelId, levelId is { } l ? levels.FirstOrDefault(x => x.Id == l)?.Name : null);
         }
-
-        var members = nodes.Where(n => n.Id != root.Id)
-            .OrderBy(n => n.SortOrder).ThenBy(n => n.Name)
-            .ToList();
-        // Tree order: parents before children, siblings by sort order.
-        var ordered = new List<Node>();
-        void Walk(long parentId)
-        {
-            foreach (var child in members.Where(n => n.ParentId == parentId)) { ordered.Add(child); Walk(child.Id); }
-        }
-        Walk(root.Id);
-        return new NodeMembers(Describe(root), ordered.Select(Describe).ToList());
+        return result;
     }
 
     /// <summary>Sets (or with null clears) the explicit place of a node: its single located_in relation.</summary>

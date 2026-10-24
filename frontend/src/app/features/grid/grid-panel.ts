@@ -406,7 +406,7 @@ export class GridPanel {
   }
 
   protected selectRow(row: Row): void {
-    if (row.nodeId != null) this.selection.selectNode(row.nodeId);
+    if (row.nodeId != null) this.selection.focusNode(row.nodeId);
   }
 
   /** Editors edit own data; on a MapManager-linked record only name and code (its data is read only). */

@@ -33,6 +33,11 @@ export class SelectionService {
     fovDeg: number;
   } | null>(null);
 
+  /** The middle pane: 2D map or 3D view (a model focused from the data tree switches to 3D). */
+  readonly centerView = signal<'map' | 'globe'>('map');
+  /** A model to bring into view in 3D (data tree); the tick repeats a focus on the same model. */
+  readonly modelFocus = signal<{ id: number; tick: number } | null>(null);
+
   /** Bumped after edits (create, update, move, delete, import): views reload their data. */
   readonly version = signal(0);
 
@@ -77,6 +82,7 @@ export class SelectionService {
     this.siteId.set(id);
     this.levelId.set(null);
     this.openPanorama(null);
+    this.modelFocus.set(null);
     this.selectNode(null);
   }
 
@@ -94,10 +100,35 @@ export class SelectionService {
   /** Bumped by {@link focusNode}: views bring the selected node into view even if it was selected already. */
   readonly focusTick = signal(0);
 
-  /** Select a node and ask every view to show it (e.g. a click on its info point). */
-  focusNode(id: number): void {
+  /**
+   * Select a node and ask every view to show it, even if it was selected already. The panorama follows too: if the
+   * node has an info point, its panorama opens (<paramref name="openPanorama"/>: a click in a graphical view) or – if
+   * a panorama is open already – the view switches to one showing the node.
+   */
+  focusNode(id: number, openPanorama = false): void {
     this.selectNode(id);
     this.focusTick.update((v) => v + 1);
+    if (!openPanorama && this.panoramaId() == null) return;
+    this.api.nodeAnchors(id).subscribe((anchors) => {
+      if (this.nodeId() !== id) return;
+      const panoramas = anchors
+        .filter((a) => a.kind === 'panorama_point' && a.panoramaId != null)
+        .map((a) => a.panoramaId!);
+      if (panoramas.length > 0 && !panoramas.includes(this.panoramaId() ?? -1))
+        this.openPanorama(panoramas[0]);
+    });
+  }
+
+  /** Show an uploaded model: the 3D view opens and flies to it. */
+  focusModel(id: number): void {
+    this.centerView.set('globe');
+    this.modelFocus.set({ id, tick: (this.modelFocus()?.tick ?? 0) + 1 });
+  }
+
+  /** Show a panorama: it opens, and the map goes to its level and position. */
+  focusPanorama(id: number): void {
+    this.centerView.set('map');
+    this.openPanorama(id);
   }
 
   /** After a change: reload the views; optionally select a node (e.g. a newly created one). */

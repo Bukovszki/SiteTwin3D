@@ -33,6 +33,7 @@ import {
   GeometryInstance,
   HeadingPitchRange,
   HeadingPitchRoll,
+  LabelStyle,
   ImageryLayer,
   Math as CesiumMath,
   Matrix4,
@@ -43,6 +44,7 @@ import {
   ScreenSpaceEventType,
   TileMapServiceImageryProvider,
   Transforms,
+  VerticalOrigin,
   Viewer,
   buildModuleUrl,
 } from 'cesium';
@@ -53,7 +55,7 @@ import { Message } from 'primeng/message';
 import { Select } from 'primeng/select';
 import { Tooltip } from 'primeng/tooltip';
 import { ApiService } from '../core/api/api.service';
-import { Anchor, GeoJsonGeometry, LevelInfo, ModelAsset } from '../core/api/models';
+import { Anchor, GeoJsonGeometry, LevelInfo, ModelAsset, Place } from '../core/api/models';
 import { LocalPlane, SnapIndex, SnapResult } from '../core/geo/snap';
 import { Permissions } from '../core/auth/permissions';
 import { MESSAGES } from '../core/i18n/messages';
@@ -78,6 +80,8 @@ interface BoxDraft extends BoxShape {
 const HANDLES: Handle[] = ['+x', '-x', '+y', '-y', '+z', 'rotate', 'move'];
 /** Default box when placing: 1 m cube standing on the clicked surface. */
 const NEW_BOX = 1;
+/** Radius around a GLB's placement point while its content is not loaded (metres). */
+const GLB_FALLBACK_RADIUS = 25;
 /** The cut under the ceiling of a level: the slab above is removed, the walls stay. */
 const CUT_BELOW_CEILING = 0.5;
 const DEFAULT_LEVEL_HEIGHT = 3;
@@ -128,7 +132,7 @@ type Tool = 'box' | 'point' | 'element';
             [text]="true"
             size="small"
             [pTooltip]="m.box.place"
-            [disabled]="models().length === 0"
+            [disabled]="readyModels().length === 0"
             (onClick)="startTool('box')"
           />
           <p-button
@@ -136,7 +140,7 @@ type Tool = 'box' | 'point' | 'element';
             [text]="true"
             size="small"
             [pTooltip]="m.viewer3d.point"
-            [disabled]="models().length === 0"
+            [disabled]="readyModels().length === 0"
             (onClick)="startTool('point')"
           />
           @if (hasSegmented()) {
@@ -166,6 +170,7 @@ type Tool = 'box' | 'point' | 'element';
         @if (can.prepare()) {
           <p-button
             icon="pi pi-upload"
+            [label]="m.models.upload"
             [text]="true"
             size="small"
             [pTooltip]="m.models.manage"
@@ -180,7 +185,11 @@ type Tool = 'box' | 'point' | 'element';
             <br /><small>{{ m.viewer3d.snapPartial }}</small>
           }
         </p-message>
-      } @else if (loaded() && models().length === 0) {
+      } @else if (converting()) {
+        <p-message severity="info" styleClass="hint"
+          ><i class="pi pi-spin pi-spinner"></i> {{ m.viewer3d.converting }}</p-message
+        >
+      } @else if (loaded() && readyModels().length === 0) {
         <p-message severity="secondary" styleClass="hint">{{ m.viewer3d.noModel }}</p-message>
       }
       @if (editing(); as box) {
@@ -360,9 +369,19 @@ export class ModelViewer {
   protected readonly tool = signal<Tool | null>(null);
   /** Model elements linked to records (model_feature anchors). */
   protected readonly elements = signal<Anchor[]>([]);
+  /** One place per node; those only with a point or info-point place get a marker here (boxes and elements show themselves). */
+  protected readonly places = signal<Place[]>([]);
   protected readonly snapTolerance = signal(DEFAULT_SNAP_M);
   protected readonly floorPartial = signal(false);
-  protected readonly hasSegmented = computed(() => this.models().some((x) => x.segmented));
+  protected readonly hasSegmented = computed(() =>
+    this.models().some((x) => x.segmented && x.status === 'ready'),
+  );
+  protected readonly readyModels = computed(() =>
+    this.models().filter((x) => x.status === 'ready'),
+  );
+  protected readonly converting = computed(() =>
+    this.models().some((x) => x.status === 'converting'),
+  );
   /**
    * X-ray (M8): a whole subtree (e.g. a process line) is selected and the whole model is shown – the buildings turn
    * translucent and the highlighted elements show through floors and walls, across buildings and levels.
@@ -420,6 +439,7 @@ export class ModelViewer {
     effect(() => {
       this.selection.highlightIds();
       this.boxes();
+      this.places();
       this.xray();
       untracked(() => this.drawBoxes());
     });
@@ -446,6 +466,13 @@ export class ModelViewer {
       untracked(() => {
         if (nodeId != null && nodeId !== this.pickedHere) this.flyToNode(nodeId);
         this.pickedHere = null;
+      });
+    });
+    // A model chosen in the data tree: the camera flies to it (once it is loaded).
+    effect(() => {
+      const focus = this.selection.modelFocus();
+      untracked(() => {
+        if (focus) this.flyToModel(focus.id);
       });
     });
     // Snap targets: the vector geometry of the selected level.
@@ -515,6 +542,7 @@ export class ModelViewer {
       this.levels.set([]);
       this.boxes.set([]);
       this.elements.set([]);
+      this.places.set([]);
       this.showModels([]);
       return;
     }
@@ -523,6 +551,7 @@ export class ModelViewer {
     this.api
       .siteAnchors(siteId, 'model_feature')
       .subscribe((elements) => this.elements.set(elements));
+    this.api.places(siteId, null, true).subscribe((places) => this.places.set(places));
     this.api.siteAnchors(siteId, 'region').subscribe((boxes) => {
       this.boxes.set(boxes);
       const editing = this.editing();
@@ -539,11 +568,16 @@ export class ModelViewer {
     if (siteId == null) return;
     this.api.models(siteId).subscribe((models) => {
       const key = (list: ModelAsset[]) =>
-        list.map((x) => `${x.id}:${JSON.stringify(x.placement)}:${x.elementIdProperty}`).join();
+        list
+          .map((x) => `${x.id}:${x.status}:${JSON.stringify(x.placement)}:${x.elementIdProperty}`)
+          .join();
       const changed = key(models) !== key(this.models());
       this.models.set(models);
       this.loaded.set(true);
-      if (changed) this.showModels(models);
+      // Only converted (ready) models are shown; a running conversion is looked at again shortly.
+      if (changed) this.showModels(models.filter((x) => x.status === 'ready'));
+      if (models.some((x) => x.status === 'converting'))
+        setTimeout(() => this.selection.siteId() === siteId && this.loadModels(), 5000);
     });
   }
 
@@ -597,8 +631,51 @@ export class ModelViewer {
     this.applyClipping();
     this.applyStyles();
     const selected = this.selection.nodeId();
-    if (selected != null) this.flyToNode(selected, 0);
+    const focused = this.selection.modelFocus()?.id;
+    if (focused != null && this.tilesets.has(focused)) this.flyToModel(focused, 0);
+    else if (selected != null) this.flyToNode(selected, 0);
     else this.flyHome(0);
+  }
+
+  /**
+   * The bounding sphere of a model. A GLB is served as a one-tile tileset with a generous bound (the API does not open
+   * the GLB), so its loaded content's own sphere is used (`_model` of the tile content is not in the typings; check
+   * after a Cesium update); not loaded yet: around the placement point. A 3D Tiles package has a real bound.
+   */
+  private modelSphere(modelId: number, tileset: Cesium3DTileset): BoundingSphere {
+    if (this.models().find((x) => x.id === modelId)?.kind !== 'gltf') return tileset.boundingSphere;
+    const content = tileset.root.content as unknown as {
+      _model?: { ready: boolean; boundingSphere: BoundingSphere };
+    };
+    if (content?._model?.ready) return content._model.boundingSphere;
+    return new BoundingSphere(tileset.boundingSphere.center, GLB_FALLBACK_RADIUS);
+  }
+
+  /** Brings a whole model into view; a model not loaded yet (or still converting) is shown when it is. */
+  private flyToModel(modelId: number, duration = 1.2): void {
+    const tileset = this.tilesets.get(modelId);
+    if (!this.viewer || !tileset) return;
+    const sphere = this.modelSphere(modelId, tileset);
+    // A GLB whose content is still loading: once it is in, the view follows its real size (if still focused).
+    if (sphere.radius === GLB_FALLBACK_RADIUS) {
+      const until = Date.now() + 30000;
+      const scene = this.viewer.scene;
+      const stop = scene.postRender.addEventListener(() => {
+        if (this.selection.modelFocus()?.id !== modelId || Date.now() > until) stop();
+        else if (this.modelSphere(modelId, tileset).radius !== GLB_FALLBACK_RADIUS) {
+          stop();
+          this.flyToModel(modelId, 0.6);
+        }
+      });
+    }
+    this.viewer.camera.flyToBoundingSphere(sphere, {
+      offset: new HeadingPitchRange(
+        CesiumMath.toRadians(20),
+        CesiumMath.toRadians(-35),
+        Math.max(sphere.radius * 2.5, 15),
+      ),
+      duration,
+    });
   }
 
   protected flyHome(duration = 1.2): void {
@@ -932,6 +1009,47 @@ export class ModelViewer {
         );
       }
     }
+    // Nodes whose place is a point or an info point's: a marker at their real height.
+    const site = this.selection.site();
+    const level = this.selection.levelId();
+    for (const p of this.places()) {
+      if (
+        (p.source !== 'point' && p.source !== 'panorama_point') ||
+        (level != null && p.levelId !== level) ||
+        !site
+      )
+        continue;
+      const lit = highlight.has(p.nodeId);
+      const [lon, lat] = p.position.coordinates;
+      this.viewer.entities.add(
+        new Entity({
+          id: `place:${p.nodeId}`,
+          position: Cartesian3.fromDegrees(
+            lon,
+            lat,
+            site.baseHeightM + this.levelElevation(p.levelId) + p.zRelM,
+          ),
+          point: {
+            pixelSize: lit ? 14 : 10,
+            color: Color.fromCssColorString(lit ? '#facc15' : '#f97316'),
+            outlineColor: Color.WHITE,
+            outlineWidth: 2,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+          label: {
+            text: p.nodeName,
+            font: `${lit ? 700 : 600} 13px system-ui, sans-serif`,
+            fillColor: Color.WHITE,
+            outlineColor: Color.BLACK,
+            outlineWidth: 3,
+            style: LabelStyle.FILL_AND_OUTLINE,
+            verticalOrigin: VerticalOrigin.BOTTOM,
+            pixelOffset: new Cartesian2(0, -12),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+        }),
+      );
+    }
     if (editing) this.drawEditor();
   }
 
@@ -1032,9 +1150,13 @@ export class ModelViewer {
 
   // ── Pointer ─────────────────────────────────────────────────────────────
 
-  private pickedHandle(position: Cartesian2): Handle | null {
+  private pickedEntityId(position: Cartesian2): string | null {
     const picked = this.viewer?.scene.pick(position) as { id?: Entity } | undefined;
-    const id = picked?.id instanceof Entity ? picked.id.id : '';
+    return picked?.id instanceof Entity ? picked.id.id : null;
+  }
+
+  private pickedHandle(position: Cartesian2): Handle | null {
+    const id = this.pickedEntityId(position) ?? '';
     return id.startsWith('handle:') ? (id.slice(7) as Handle) : null;
   }
 
@@ -1090,6 +1212,14 @@ export class ModelViewer {
 
   private click(position: Cartesian2): void {
     if (!this.viewer || this.dragged || this.pickedHandle(position)) return;
+    const marker = this.pickedEntityId(position);
+    if (marker?.startsWith('place:') && !this.tool()) {
+      const nodeId = Number(marker.slice(6));
+      this.stopEditing();
+      this.pickedHere = nodeId;
+      this.selection.focusNode(nodeId, true);
+      return;
+    }
     const tool = this.tool();
     if (tool === 'element') {
       this.linkElement(position);
@@ -1117,8 +1247,7 @@ export class ModelViewer {
     if (linked) {
       this.stopEditing();
       this.pickedHere = linked.nodeId;
-      this.selection.selectNode(linked.nodeId);
-      this.openInfoPointPanorama(linked.nodeId);
+      this.selection.focusNode(linked.nodeId, true);
       return;
     }
     if (!point) return;
@@ -1143,20 +1272,9 @@ export class ModelViewer {
       return;
     }
     this.pickedHere = hit.anchor.nodeId;
-    this.selection.selectNode(hit.anchor.nodeId);
-    this.openInfoPointPanorama(hit.anchor.nodeId);
+    // Every view shows it, the panorama too (its info point's panorama opens).
+    this.selection.focusNode(hit.anchor.nodeId, true);
     if (this.can.anchors()) this.edit(hit.anchor);
-  }
-
-  /** The selection also shows on the panorama: if the record has an info point, its panorama opens. */
-  private openInfoPointPanorama(nodeId: number): void {
-    this.api.nodeAnchors(nodeId).subscribe((anchors) => {
-      const panoramas = anchors
-        .filter((a) => a.kind === 'panorama_point' && a.panoramaId != null)
-        .map((a) => a.panoramaId!);
-      if (panoramas.length > 0 && !panoramas.includes(this.selection.panoramaId() ?? -1))
-        this.selection.openPanorama(panoramas[0]);
-    });
   }
 
   // ── Editing ─────────────────────────────────────────────────────────────

@@ -10,13 +10,16 @@ namespace Api.Endpoints.Models;
 
 /// <summary>
 /// A 3D model; <see cref="TilesetUrl"/> is the API address of its tileset.json, whose tile contents are short-lived
-/// signed URLs of the object store. <see cref="Placement"/>: only for a GLB (a 3D Tiles package is georeferenced).
+/// signed URLs of the object store. <see cref="Status"/>: ready | converting | failed (IFC, mesh, point cloud uploads);
+/// <see cref="Conversion"/>: what the converter reported (source file, elements / points, coordinate system, warnings).
 /// </summary>
 public record ModelDto(long Id, long SiteId, long? NodeId, string Name, string Kind, bool Segmented, ModelPlacement? Placement,
-    string? ElementIdProperty, string TilesetUrl)
+    string? ElementIdProperty, string TilesetUrl, string Status, string? SourceFormat, string? ProcessingError, string? Srs, JsonElement? Conversion)
 {
     public static ModelDto From(ModelAsset m) => new(m.Id, m.SiteId, m.NodeId, ModelService.AttrString(m, "name") ?? $"#{m.Id}", m.Kind,
-        m.Segmented, ModelService.PlacementOf(m), ModelService.AttrString(m, "element_id_property"), $"/api/v1/models/{m.Id}/tileset.json");
+        m.Segmented, ModelService.PlacementOf(m), ModelService.AttrString(m, "element_id_property"), $"/api/v1/models/{m.Id}/tileset.json",
+        m.Status, m.SourceFormat, m.ProcessingError, ModelService.AttrString(m, "srs"),
+        m.Attrs.RootElement.TryGetProperty("conversion", out var c) ? c.Clone() : null);
 }
 
 /// <summary>3D models (spec 9, FR-I1): signed upload of a GLB or a 3D Tiles package, placement, tileset with signed URLs.</summary>
@@ -25,11 +28,11 @@ public static class ModelEndpoints
     public static RouteGroupBuilder MapModelEndpoints(this RouteGroupBuilder api)
     {
         api.MapPost("/uploads/model", Upload).WithTags("Models").RequireAuthorization(Policies.Editor)
-            .WithSummary("Signed PUT URLs for the files of a model: one .glb, or a 3D Tiles package with tileset.json at its root (paths relative to the package)");
+            .WithSummary("Signed PUT URLs for the files of a model: one .glb or .ifc, a mesh (.obj + .mtl + textures, .fbx, .dae, .stl, .ply, .3ds, .gltf + .bin), a point cloud (.las, .laz, .e57), or a 3D Tiles package with tileset.json at its root");
         api.MapGet("/sites/{siteId:long}/models", List).WithTags("Models").RequireAuthorization(Policies.Member)
             .WithSummary("3D models of a site; each tileset.json comes with signed tile URLs");
         api.MapPost("/sites/{siteId:long}/models", Create).WithTags("Models").RequireAuthorization(Policies.Editor)
-            .WithSummary("Registers an uploaded model (prefix, name, nodeId, placement for a GLB: lon, lat, heightM above the site base, headingDeg)");
+            .WithSummary("Registers an uploaded model (prefix, name, nodeId, placement: lon, lat, heightM above the site base, headingDeg; srs for a point cloud); IFC, mesh and point clouds are converted in the background (status converting → ready | failed)");
 
         var group = api.MapGroup("/models").WithTags("Models");
         group.MapGet("/{id:long}", Get).RequireAuthorization(Policies.Member);

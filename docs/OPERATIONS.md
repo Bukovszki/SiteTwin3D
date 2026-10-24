@@ -10,6 +10,7 @@ Ez a leírás a rendszer egy szerveres, Docker Compose alapú telepítésének �
 | `api` (.NET) | REST API, háttérfeladatok (panoráma-feldolgozás, tártakarítás) | nem |
 | `db` (PostgreSQL + PostGIS) | adatbázis (`pgdata` kötet) | nem |
 | `storage` (SeaweedFS, S3) | panorámák, 3D modellek (`storage` kötet) | csak aláírt URL-lel, a `web`-en át |
+| `converter` (Python) | IFC, mesh (OBJ, FBX …) és pontfelhő (LAS, LAZ, E57) átalakítása 3D megjelenítésre | nem |
 
 A bináris tartalom (panoráma, modell) soha nem kerül az adatbázisba; a böngésző rövid lejáratú aláírt URL-lel éri el az objektumtárat. Ezért **a mentéshez az adatbázist és az objektumtárat is menteni kell** (3. fejezet).
 
@@ -94,6 +95,14 @@ A válasz tartalma:
 - az árvák száma és összmérete, valamint néhány minta-kulcs;
 - a türelmi időn belüli („fiatal”) hivatkozatlan fájlok száma;
 - a lejárt eredetik és a ténylegesen törölt fájlok száma.
+
+## 4b. Modellátalakítás
+
+A feltöltött IFC-, mesh- és pontfelhőfájlokat a `converter` szolgáltatás alakítja át, egyszerre egyet; a modellek listájában az állapot „Átalakítás…”, majd „Kész” vagy „Hiba” (az ok a sor fölé víve látszik).
+
+- Memória: `CONVERTER_MEMORY` (alapból 4g). Nagy IFC vagy pontfelhő esetén növelje; a pontfelhő legfeljebb `CONVERTER_MAX_POINTS` pontot tart meg (alapból 30 millió, a többit egyenletesen ritkítja, és ezt jelzi).
+- Időkorlát: 120 perc átalakításonként (`Converter__TimeoutMinutes`); ha a konverter nem érhető el, az API ötször próbálkozik, utána „Hiba”.
+- Napló: `docker compose logs converter`.
 
 ## 5. Naplók
 

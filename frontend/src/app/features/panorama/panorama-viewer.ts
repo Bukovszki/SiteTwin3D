@@ -124,6 +124,8 @@ export class PanoramaViewer {
   readonly boxes = signal<Anchor[]>([]);
   /** Info points may be dragged (editing modes). */
   readonly editable = signal(false);
+  /** Picking a direction (placing an info point, calibrating): markers do not select, the click is the direction. */
+  readonly picking = signal(false);
 
   constructor() {
     afterNextRender(() => this.create());
@@ -443,12 +445,13 @@ export class PanoramaViewer {
 
   private click(position: Cartesian2): void {
     if (!this.viewer || !this.panorama) return;
-    const id = this.pickedEntity(position)?.id ?? null;
+    const id = this.picking() ? null : (this.pickedEntity(position)?.id ?? null);
     if (id?.startsWith('nav:')) {
       this.navigate.emit(Number(id.slice(4)));
       return;
     }
-    if (id?.startsWith('info:')) {
+    // An info point or a drawn box: its node.
+    if (id?.startsWith('info:') || id?.startsWith('box:')) {
       this.infoPointClicked.emit(Number(id.split(':')[1]));
       return;
     }

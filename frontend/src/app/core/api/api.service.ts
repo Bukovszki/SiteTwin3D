@@ -26,6 +26,8 @@ import {
   NodeType,
   Panorama,
   PanoramaNeighbour,
+  Place,
+  Placement,
   PrivacyRegion,
   Site,
   SyncResult,
@@ -115,6 +117,10 @@ export class ApiService {
   members(id: number): Observable<NodeMembers> {
     return this.http.get<NodeMembers>(`${API}/nodes/${id}/members`);
   }
+  /** The place of every node of the functional tree (for the location tree). */
+  placements(siteId: number): Observable<Placement[]> {
+    return this.http.get<Placement[]>(`${API}/sites/${siteId}/placements`);
+  }
   /** Explicit place (located_in); null clears it. */
   setLocation(id: number, locationId: number | null): Observable<void> {
     return this.http.put<void>(`${API}/nodes/${id}/location`, { locationId });
@@ -175,6 +181,10 @@ export class ApiService {
   panoramas(siteId: number, levelId: number | null): Observable<Panorama[]> {
     return this.http.get<Panorama[]>(`${API}/sites/${siteId}/panoramas`, { params: levelId == null ? { outdoor: true } : { levelId } });
   }
+  /** Every panorama of the site, on any level or outdoor (data tree). */
+  sitePanoramas(siteId: number): Observable<Panorama[]> {
+    return this.http.get<Panorama[]>(`${API}/sites/${siteId}/panoramas`);
+  }
   panorama(id: number): Observable<Panorama> {
     return this.http.get<Panorama>(`${API}/panoramas/${id}`);
   }
@@ -200,6 +210,15 @@ export class ApiService {
   // Anchors (info points)
   levelAnchors(siteId: number, levelId: number | null): Observable<Anchor[]> {
     return this.http.get<Anchor[]>(`${API}/sites/${siteId}/anchors`, { params: levelId == null ? {} : { levelId } });
+  }
+  /** One place per node on a level (null: outdoor), or on the whole site. */
+  places(siteId: number, levelId: number | null, allLevels = false): Observable<Place[]> {
+    const params: Record<string, string | number | boolean> = allLevels ? { allLevels } : levelId == null ? {} : { levelId };
+    return this.http.get<Place[]>(`${API}/sites/${siteId}/places`, { params });
+  }
+  /** The single place of a node (null: none yet). */
+  place(nodeId: number): Observable<Place | null> {
+    return this.http.get<Place | null>(`${API}/nodes/${nodeId}/place`);
   }
   panoramaAnchors(panoramaId: number): Observable<Anchor[]> {
     return this.http.get<Anchor[]>(`${API}/panoramas/${panoramaId}/anchors`);

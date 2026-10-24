@@ -81,6 +81,16 @@ public sealed class LocationTests(PostgisFixture postgis) : ApiTestBase(postgis)
         Assert.Null(Place("Tartalék"));
         Assert.Equal(1, members["P1"].GetProperty("depth").GetInt32());
 
+        // The same answer for the location tree: every node of the functional tree with its place.
+        var placements = (await h.GetFromJsonAsync<JsonElement>($"/api/v1/sites/{site}/placements")).EnumerateArray()
+            .ToDictionary(p => p.GetProperty("nodeId").GetInt64());
+        Assert.Equal(hall, placements[pump].GetProperty("locationId").GetInt64());
+        Assert.Equal("box", placements[pump].GetProperty("source").GetString());
+        Assert.Equal(store, placements[screen].GetProperty("locationId").GetInt64());
+        Assert.Equal("relation", placements[screen].GetProperty("source").GetString());
+        Assert.Equal(JsonValueKind.Null, placements[spare].GetProperty("locationId").ValueKind);
+        Assert.False(placements.ContainsKey(hall)); // location nodes are the tree itself
+
         // Clearing the relation: back to the box (the screen stands in the hall box).
         await h.PutAsJsonAsync($"/api/v1/nodes/{screen}/location", new { locationId = (long?)null });
         var cleared = await h.GetFromJsonAsync<JsonElement>($"/api/v1/nodes/{screen}/members");

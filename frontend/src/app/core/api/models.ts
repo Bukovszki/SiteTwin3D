@@ -111,6 +111,19 @@ export interface Node {
   finalizedAt: string | null;
 }
 
+/** The single place of a node: from its model element or box, else its point, else its info point (source). */
+export interface Place {
+  nodeId: number;
+  nodeName: string;
+  nodeCode: string | null;
+  typeCode: string;
+  source: Anchor['kind'];
+  anchorId: number;
+  position: GeoJsonPoint;
+  levelId: number | null;
+  zRelM: number;
+}
+
 /** A recorded change of a finalized node (or of one of its anchors). */
 export interface ChangeView {
   id: number;
@@ -319,6 +332,13 @@ export interface ModelAsset {
   elementIdProperty: string | null;
   /** tileset.json through the API: its tile contents are short-lived signed object store URLs. */
   tilesetUrl: string;
+  /** IFC, mesh formats and point clouds are converted in the background (converting → ready | failed). */
+  status: 'ready' | 'converting' | 'failed';
+  sourceFormat: 'ifc' | 'mesh' | 'pointcloud' | null;
+  processingError: string | null;
+  /** Point clouds: the source coordinate system (e.g. EPSG:23700). */
+  srs: string | null;
+  conversion: { source: string; format: string; elements?: number | null; points?: number | null; crs?: string | null; warnings?: string[] } | null;
 }
 
 /** Where a node is: explicit located_in relation, or derived from the smallest location box containing its anchor. */
@@ -343,6 +363,13 @@ export interface MemberLocation {
 }
 
 /** A node and its whole subtree (e.g. the elements of a process line) with their places. */
+/** Where a node of the functional tree is (it shows under that place in the location tree). */
+export interface Placement {
+  nodeId: number;
+  locationId: number | null;
+  source: 'relation' | 'box' | null;
+}
+
 export interface NodeMembers {
   node: MemberLocation;
   members: MemberLocation[];

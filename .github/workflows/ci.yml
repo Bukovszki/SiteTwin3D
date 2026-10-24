@@ -38,6 +38,14 @@ jobs:
       - run: npx ng build --configuration production
       - run: npx ng test --watch=false
 
+  converter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The converter tests run in its own image (IfcOpenShell, Assimp, laspy, pye57) on generated samples.
+      - run: docker build -f converter/Dockerfile -t twin-converter .
+      - run: docker run --rm twin-converter python -m tests.test_convert
+
   deploy-config:
     runs-on: ubuntu-latest
     steps:

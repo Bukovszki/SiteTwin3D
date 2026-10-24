@@ -65,6 +65,18 @@ public class ModelAsset : IOrganizationOwned
     public bool Segmented { get; set; }
     public string StorageKey { get; set; } = "";
     public JsonDocument Attrs { get; set; } = JsonDocument.Parse("{}");
+    /// <summary>ready | converting (IFC, mesh formats, point clouds: the converter works on it) | failed.</summary>
+    public string Status { get; set; } = ModelStatus.Ready;
+    /// <summary>The uploaded format if converted: ifc | mesh | pointcloud (null: GLB or 3D Tiles as uploaded).</summary>
+    public string? SourceFormat { get; set; }
+    public string? ProcessingError { get; set; }
+}
+
+public static class ModelStatus
+{
+    public const string Ready = "ready";
+    public const string Converting = "converting";
+    public const string Failed = "failed";
 }
 
 public static class LayerSources

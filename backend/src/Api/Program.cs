@@ -58,6 +58,16 @@ builder.Services.AddScoped<PanoramaProcessor>();
 builder.Services.AddScoped<PanoramaService>();
 builder.Services.AddScoped<PanoramaLinkService>();
 builder.Services.AddScoped<ModelService>();
+builder.Services.Configure<ConverterOptions>(builder.Configuration.GetSection(ConverterOptions.Section));
+builder.Services.AddSingleton<ModelConversionQueue>();
+builder.Services.AddScoped<ModelConversionService>();
+builder.Services.AddHttpClient(ConverterOptions.ClientName, (sp, client) =>
+{
+    var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<ConverterOptions>>().Value;
+    client.BaseAddress = new Uri(options.Url.TrimEnd('/') + "/");
+    client.Timeout = Timeout.InfiniteTimeSpan; // the service sets its own (ConverterOptions.TimeoutMinutes)
+});
+if (builder.Configuration.GetValue("Converter:RunWorker", true)) builder.Services.AddHostedService<ModelConversionWorker>();
 builder.Services.AddScoped<FloorGeometryService>();
 builder.Services.AddScoped<LocationService>();
 builder.Services.AddScoped<ChangeContext>();

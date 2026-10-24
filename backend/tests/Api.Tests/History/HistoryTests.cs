@@ -93,7 +93,11 @@ public sealed class HistoryTests(PostgisFixture postgis) : ApiTestBase(postgis)
         await org.Http.SendAsync(With(HttpMethod.Patch, $"/api/v1/anchors/{anchor}", Point(3), "áthelyezés", "2026-03-01"));
         // A correction of the same day, recorded later: the move was 3.5 m, not 3 m.
         await org.Http.SendAsync(With(HttpMethod.Patch, $"/api/v1/anchors/{anchor}", Point(3.5), "javítás: pontos hely", "2026-03-01"));
-        var extra = await org.Http.SendAsync(With(HttpMethod.Post, $"/api/v1/nodes/{pump}/anchors", Point(10), "második pont", "2026-05-01"));
+        var extra = await org.Http.SendAsync(With(HttpMethod.Post, $"/api/v1/nodes/{pump}/anchors", new
+        {
+            kind = "region", regionShape = "box", sizeX = 1, sizeY = 1, sizeZ = 1, headingDeg = 0, zRelM = 0.5,
+            position = new { type = "Point", coordinates = new[] { Lon + 10 / 75470.0, Lat } },
+        }, "bedobozolás", "2026-05-01"));
 
         async Task<JsonElement> State(string day) => await org.Http.GetFromJsonAsync<JsonElement>($"/api/v1/nodes/{pump}/state?asOf={day}");
         double East(JsonElement a) => (a.GetProperty("position")[0].GetDouble() - Lon) * 75470;

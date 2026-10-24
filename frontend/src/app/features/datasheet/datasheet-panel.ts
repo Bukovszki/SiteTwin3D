@@ -29,7 +29,7 @@ import { SchemaForm } from './schema-form';
     @if (node(); as n) {
       <div class="crumbs">
         @for (a of ancestors(); track a.id) {
-          <a (click)="selection.selectNode(a.id)">{{ a.name }}</a
+          <a (click)="selection.focusNode(a.id)">{{ a.name }}</a
           ><i class="pi pi-angle-right"></i>
         }
         <b>{{ n.name }}</b>
@@ -157,7 +157,7 @@ import { SchemaForm } from './schema-form';
           <h4>{{ m.location.title }}</h4>
           <div class="place">
             @if (selection.members()?.node?.location; as place) {
-              <a (click)="selection.selectNode(place.nodeId)">{{ place.path.join(' › ') }}</a>
+              <a (click)="selection.focusNode(place.nodeId)">{{ place.path.join(' › ') }}</a>
               <small class="muted">({{ m.location.sources[place.source] }})</small>
             } @else {
               <span class="muted">{{ m.location.none }}</span>
@@ -187,7 +187,7 @@ import { SchemaForm } from './schema-form';
             @for (item of selection.members()!.members; track item.nodeId) {
               <tr>
                 <th [style.padding-left.rem]="0.5 + (item.depth - 1)">
-                  <a (click)="selection.selectNode(item.nodeId)">{{ item.name }}</a>
+                  <a (click)="selection.focusNode(item.nodeId)">{{ item.name }}</a>
                 </th>
                 <td>
                   @if (item.location; as place) {

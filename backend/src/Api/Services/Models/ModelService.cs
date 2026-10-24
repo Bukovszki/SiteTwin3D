@@ -25,7 +25,45 @@ public record ModelUploadTicket(string Prefix, List<ModelUploadUrl> Files, DateT
 /// </summary>
 public record ModelPlacement(double Lon, double Lat, double HeightM, double HeadingDeg);
 
-public record ModelCreate(string Prefix, string Name, long? NodeId, ModelPlacement? Placement, string? ElementIdProperty);
+/// <param name="Srs">Point clouds: the source coordinate system (e.g. EPSG:23700); without it the cloud is placed like a GLB.</param>
+public record ModelCreate(string Prefix, string Name, long? NodeId, ModelPlacement? Placement, string? ElementIdProperty, string? Srs = null);
+
+/// <summary>What an upload is: a ready 3D Tiles package or GLB, or a source the converter turns into one (spec 9.2).</summary>
+public static class ModelFormats
+{
+    public const string Tileset = "3dtiles";
+    public const string Glb = "glb";
+    public const string Ifc = "ifc";
+    public const string Mesh = "mesh";
+    public const string PointCloud = "pointcloud";
+
+    /// <summary>Mesh formats of the converter (Assimp); a .gltf with its .bin and textures is converted to one GLB.</summary>
+    public static readonly string[] MeshExtensions = [".obj", ".fbx", ".dae", ".stl", ".ply", ".3ds", ".x3d", ".off", ".gltf"];
+    public static readonly string[] PointCloudExtensions = [".las", ".laz", ".e57"];
+    /// <summary>Files that may come with a mesh: materials, textures, buffers.</summary>
+    public static readonly string[] CompanionExtensions = [".mtl", ".png", ".jpg", ".jpeg", ".tga", ".bmp", ".tif", ".tiff", ".bin", ".webp"];
+
+    /// <summary>The format and the main file of an upload (paths relative to it); null if it is none of them.</summary>
+    public static (string Format, string Main)? Detect(IReadOnlyCollection<string> paths)
+    {
+        if (paths.Contains(ModelService.TilesetFile)) return (Tileset, ModelService.TilesetFile);
+        string Ext(string p) => Path.GetExtension(p).ToLowerInvariant();
+        var mains = paths.Where(p => Ext(p) is ".glb" or ".ifc" || MeshExtensions.Contains(Ext(p)) || PointCloudExtensions.Contains(Ext(p))).ToList();
+        if (mains.Count != 1) return null;
+        var main = mains[0];
+        var format = Ext(main) switch
+        {
+            ".glb" => Glb,
+            ".ifc" => Ifc,
+            var e when PointCloudExtensions.Contains(e) => PointCloud,
+            _ => Mesh,
+        };
+        // Only a mesh may bring other files (materials, textures); everything else is a single file.
+        var others = paths.Where(p => p != main).ToList();
+        if (others.Count > 0 && (format != Mesh || others.Any(p => !CompanionExtensions.Contains(Ext(p))))) return null;
+        return (format, main);
+    }
+}
 
 /// <summary>Partial update; null = not sent (the *Set flags distinguish clearing a value).</summary>
 public record ModelUpdate(string? Name = null, long? NodeId = null, bool NodeIdSet = false, ModelPlacement? Placement = null,
@@ -46,7 +84,8 @@ public record ElementCheck(string Property, int ContentsChecked, int ContentsWit
 /// transform carries the placement – so the classification volumes of the boxes (spec 9.1) work on every model.
 /// Processing chain (spec 9.2, open): conversion from IFC / DWG / photogrammetry happens outside, see docs.
 /// </summary>
-public partial class ModelService(AppDbContext db, IObjectStorage storage, CurrentUser currentUser, IOptions<StorageOptions> storageOptions)
+public partial class ModelService(AppDbContext db, IObjectStorage storage, CurrentUser currentUser, IOptions<StorageOptions> storageOptions,
+    ModelConversionQueue conversions)
 {
     public const string TilesetFile = "tileset.json";
     private const int MaxFiles = 20000;
@@ -56,6 +95,12 @@ public partial class ModelService(AppDbContext db, IObjectStorage storage, Curre
 
     [GeneratedRegex(@"^org/\d+/models/[0-9a-f]{32}/")]
     private static partial Regex PrefixRegex();
+
+    [GeneratedRegex(@"^EPSG:\d{4,6}$")]
+    private static partial Regex EpsgRegex();
+
+    /// <summary>The upload folder of a model (its sources and the converted files are under it).</summary>
+    public static string FolderOf(string storageKey) => PrefixRegex().Match(storageKey).Value;
 
     private string ModelsPrefix => $"org/{currentUser.OrganizationId}/models/";
 
@@ -72,8 +117,9 @@ public partial class ModelService(AppDbContext db, IObjectStorage storage, Curre
         var paths = files.Select(f => ValidPath(f.Path)).ToList();
         if (paths.Distinct(StringComparer.Ordinal).Count() != paths.Count)
             throw AppException.BadRequest("model.invalid_files", "Duplicate file paths.");
-        if (!paths.Contains(TilesetFile) && !(paths.Count == 1 && IsGlb(paths[0])))
-            throw AppException.BadRequest("model.unknown_format", "Upload a single .glb, or a 3D Tiles package with tileset.json at its root.");
+        if (ModelFormats.Detect(paths) is null)
+            throw AppException.BadRequest("model.unknown_format",
+                "Upload one model: .glb, .ifc, a mesh (.obj with .mtl and textures, .fbx, .dae, .stl, .ply, .3ds, .gltf), a point cloud (.las, .laz, .e57), or a 3D Tiles package with tileset.json at its root.");
 
         var prefix = $"{ModelsPrefix}{Guid.NewGuid():N}/";
         var urls = paths.Select(p => new ModelUploadUrl(p, storage.PresignPut(prefix + p, ContentTypeOf(p)), ContentTypeOf(p))).ToList();
@@ -96,7 +142,25 @@ public partial class ModelService(AppDbContext db, IObjectStorage storage, Curre
         var keys = (await storage.ListAsync(prefix, ct)).Select(o => o.Key).ToList();
         var asset = new ModelAsset { SiteId = siteId, NodeId = request.NodeId };
         var attrs = new JsonObject { ["name"] = request.Name.Trim() };
-        if (keys.Contains(prefix + TilesetFile))
+        var detected = ModelFormats.Detect(keys.Select(k => k[prefix.Length..]).ToList());
+        if (detected is { Format: ModelFormats.Ifc or ModelFormats.Mesh or ModelFormats.PointCloud } source)
+        {
+            // Converted in the background (spec 9.2); the model shows once it is ready.
+            asset.Status = ModelStatus.Converting;
+            asset.SourceFormat = source.Format;
+            asset.Kind = source.Format == ModelFormats.PointCloud ? "3dtiles" : "gltf";
+            asset.StorageKey = prefix + source.Main;
+            if (source.Format == ModelFormats.Mesh && request.Placement is null)
+                throw AppException.BadRequest("model.placement_required", "A mesh has no georeference: placement (lon, lat, heightM, headingDeg) is required.");
+            if (request.Placement is { } p) attrs["placement"] = PlacementNode(p);
+            if (source.Format == ModelFormats.PointCloud && !string.IsNullOrWhiteSpace(request.Srs))
+            {
+                var srs = request.Srs.Trim().ToUpperInvariant();
+                if (!EpsgRegex().IsMatch(srs)) throw AppException.BadRequest("model.invalid_srs", "srs: EPSG:<code>, e.g. EPSG:23700.");
+                attrs["srs"] = srs;
+            }
+        }
+        else if (keys.Contains(prefix + TilesetFile))
         {
             // A 3D Tiles package carries its own placement (georeferenced root transform).
             asset.Kind = "3dtiles";
@@ -122,6 +186,7 @@ public partial class ModelService(AppDbContext db, IObjectStorage storage, Curre
         asset.Attrs = JsonSerializer.SerializeToDocument(attrs);
         db.ModelAssets.Add(asset);
         await db.SaveChangesAsync(ct);
+        if (asset.Status == ModelStatus.Converting) conversions.Wake();
         return asset;
     }
 
@@ -147,7 +212,8 @@ public partial class ModelService(AppDbContext db, IObjectStorage storage, Curre
         }
         if (request.Placement is { } placement)
         {
-            if (asset.Kind != "gltf") throw AppException.BadRequest("model.georeferenced", "A 3D Tiles package carries its own placement.");
+            if (asset.Kind != "gltf" && (asset.SourceFormat != ModelFormats.PointCloud || AttrString(asset, "srs") is not null))
+                throw AppException.BadRequest("model.georeferenced", "A georeferenced package carries its own placement.");
             attrs["placement"] = PlacementNode(placement);
         }
         if (request.NodeIdSet)
@@ -187,6 +253,8 @@ public partial class ModelService(AppDbContext db, IObjectStorage storage, Curre
     public async Task<JsonObject> TilesetAsync(long id, string? path, string apiBase, CancellationToken ct)
     {
         var asset = await GetAsync(id, ct);
+        if (asset.Status != ModelStatus.Ready)
+            throw AppException.Conflict("model.not_ready", asset.Status == ModelStatus.Failed ? "The conversion failed." : "The model is being converted.");
         var lifetime = TimeSpan.FromMinutes(storageOptions.Value.TileUrlMinutes);
         var site = await db.Sites.AsNoTracking().FirstAsync(s => s.Id == asset.SiteId, ct);
         if (asset.Kind == "gltf")
@@ -197,7 +265,8 @@ public partial class ModelService(AppDbContext db, IObjectStorage storage, Curre
         }
 
         var prefix = PrefixRegex().Match(asset.StorageKey).Value;
-        var relative = path is null ? TilesetFile : ValidPath(path);
+        // The root tileset is the model's key (an upload's root, or converted/ for a converted point cloud).
+        var relative = path is null ? asset.StorageKey[prefix.Length..] : ValidPath(path);
         if (!relative.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
             throw AppException.NotFound("model.not_found", "Not a tileset.");
         var tileset = await ReadTilesetAsync(prefix + relative, ct);
@@ -210,6 +279,15 @@ public partial class ModelService(AppDbContext db, IObjectStorage storage, Curre
                 ? $"{apiBase}/models/{id}/tileset.json?path={Uri.EscapeDataString(resolved)}"
                 : storage.PresignGet(prefix + resolved, lifetime);
         });
+        // A package in local coordinates (e.g. a point cloud without its coordinate system) is placed like a GLB:
+        // the placement frame goes before the root's own transform.
+        if (path is null && PlacementOf(asset) is { } local && tileset["root"] is JsonObject root)
+        {
+            var frame = Geodesy.EnuTransform(local.Lon, local.Lat, site.BaseHeightM + local.HeightM, local.HeadingDeg);
+            var own = (root["transform"] as JsonArray)?.Select(v => v!.GetValue<double>()).ToArray();
+            var combined = own is { Length: 16 } ? Multiply(frame, own) : frame;
+            root["transform"] = new JsonArray(combined.Select(v => (JsonNode)JsonValue.Create(Math.Round(v, 6))!).ToArray());
+        }
         return tileset;
     }
 
@@ -228,7 +306,7 @@ public partial class ModelService(AppDbContext db, IObjectStorage storage, Curre
         else
         {
             var prefix = PrefixRegex().Match(asset.StorageKey).Value;
-            var pending = new Queue<string>([TilesetFile]);
+            var pending = new Queue<string>([asset.StorageKey[prefix.Length..]]);
             var seen = new HashSet<string>();
             while (pending.TryDequeue(out var relative) && keys.Count < MaxCheckedContents)
             {
@@ -332,6 +410,17 @@ public partial class ModelService(AppDbContext db, IObjectStorage storage, Curre
             else parts.Add(segment);
         }
         return string.Join('/', parts);
+    }
+
+    /// <summary>Column-major 4×4 product a·b.</summary>
+    private static double[] Multiply(double[] a, double[] b)
+    {
+        var r = new double[16];
+        for (var col = 0; col < 4; col++)
+            for (var row = 0; row < 4; row++)
+                for (var k = 0; k < 4; k++)
+                    r[col * 4 + row] += a[k * 4 + row] * b[col * 4 + k];
+        return r;
     }
 
     /// <summary>

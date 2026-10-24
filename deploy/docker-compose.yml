@@ -83,6 +83,8 @@ services:
       Cleanup__IntervalHours: ${CLEANUP_INTERVAL_HOURS:-6}
       Cleanup__OrphanGraceHours: ${CLEANUP_GRACE_HOURS:-24}
       Cleanup__DryRun: ${CLEANUP_DRY_RUN:-false}
+      # IFC, mesh and point-cloud uploads are converted by the converter service (spec 9.2).
+      Converter__Url: http://converter:8090
       # Logs: one JSON object per line (docker logs, log collectors); every line of a request carries its RequestId.
       Logging__Console__FormatterName: json
       Logging__Console__FormatterOptions__IncludeScopes: "true"
@@ -100,6 +102,26 @@ services:
       storage:
         condition: service_started
     networks: [backend, frontend]
+
+  # Model converter (spec 9.2): IFC → segmented GLB, OBJ/FBX/DAE/STL/PLY/3DS → GLB, LAS/LAZ/E57 → 3D Tiles point cloud.
+  # Internal only: the API gives it jobs, it reads and writes the object store. One conversion at a time.
+  converter:
+    logging: *logging
+    build:
+      context: ..
+      dockerfile: converter/Dockerfile
+    image: twin-converter:latest
+    restart: unless-stopped
+    environment:
+      S3_ENDPOINT: http://storage:8333
+      S3_ACCESS_KEY: ${STORAGE_ACCESS_KEY}
+      S3_SECRET_KEY: ${STORAGE_SECRET_KEY}
+      CONVERTER_MAX_POINTS: ${CONVERTER_MAX_POINTS:-30000000}
+    mem_limit: ${CONVERTER_MEMORY:-4g}
+    depends_on:
+      storage:
+        condition: service_started
+    networks: [backend]
 
   web:
     logging: *logging

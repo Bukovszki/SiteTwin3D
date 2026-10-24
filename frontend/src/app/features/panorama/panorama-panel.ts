@@ -284,6 +284,7 @@ export class PanoramaPanel {
   protected startCalibration(): void {
     this.placing = false;
     this.calibrating = 'panorama';
+    this.viewer().picking.set(true);
     this.hint.set(this.m.panorama.calibrateStep1);
   }
 
@@ -298,6 +299,7 @@ export class PanoramaPanel {
       this.toasts.add({ severity: 'warn', summary: this.m.infoPoint.uncalibrated, life: 6000 });
     this.calibrating = null;
     this.placing = true;
+    this.viewer().picking.set(true);
     this.hint.set(this.m.infoPoint.step1(node.name));
   }
 
@@ -325,6 +327,15 @@ export class PanoramaPanel {
           this.toasts.add({ severity: 'success', summary: this.m.infoPoint.created, life: 2500 });
           this.selection.changed();
         });
+    // One element, one place: if the node has a place already, the info point uses it (no floorplan step).
+    if (await firstValueFrom(this.api.place(node.id))) {
+      this.hint.set(null);
+      this.api.createAnchor(node.id, body).subscribe(() => {
+        this.toasts.add({ severity: 'success', summary: this.m.infoPoint.created, life: 2500 });
+        this.selection.changed();
+      });
+      return;
+    }
     // Without a floorplan on the level the panorama's place is used for now (decided, FR-A2).
     const floorplans =
       p.levelId == null ? [] : await firstValueFrom(this.api.floorplans(p.levelId));
@@ -368,6 +379,8 @@ export class PanoramaPanel {
 
   /** Calibration: image yaw of a point here, then the same point on the floorplan → heading of the image centre. */
   protected onClick(click: PanoramaClick): void {
+    // The direction is picked: markers select again.
+    this.viewer().picking.set(false);
     if (this.placing) {
       void this.placeInfoPoint(click);
       return;

@@ -23,7 +23,7 @@ import { SchemaForm } from '../datasheet/schema-form';
         </div>
         <div class="field">
           <label for="new-type">{{ m.node.type }}</label>
-          <p-select inputId="new-type" name="type" [options]="types()" optionLabel="name" optionValue="id" [(ngModel)]="typeId" fluid />
+          <p-select inputId="new-type" name="type" [options]="types()" optionLabel="name" optionValue="id" [ngModel]="typeId()" (ngModelChange)="typeId.set($event); attrs = {}" fluid />
         </div>
         <div class="row">
           <div class="field">
@@ -40,7 +40,7 @@ import { SchemaForm } from '../datasheet/schema-form';
         }
         <div class="actions">
           <p-button [label]="m.common.cancel" severity="secondary" [text]="true" (onClick)="visible.set(false)" />
-          <p-button type="submit" [label]="m.node.create" icon="pi pi-check" [loading]="saving()" [disabled]="!typeId || !name.trim()" />
+          <p-button type="submit" [label]="m.node.create" icon="pi pi-check" [loading]="saving()" [disabled]="!typeId() || !name.trim() || missingRequired()" />
         </div>
       </form>
     </p-dialog>
@@ -67,7 +67,8 @@ export class NodeCreateDialog {
   readonly parent = input<Node | null>(null);
   readonly created = output<Node>();
 
-  protected typeId: number | null = null;
+  /** A signal: the schema (form fields) follows the chosen type. */
+  protected readonly typeId = signal<number | null>(null);
   protected name = '';
   protected code = '';
   protected attrs: Record<string, unknown> = {};
@@ -75,10 +76,16 @@ export class NodeCreateDialog {
 
   /** Types of the current tree (aspect). */
   protected readonly types = computed(() => this.selection.nodeTypes().filter((t) => t.aspect === this.selection.aspect()));
-  protected readonly schema = computed(() => this.selection.typeOf(this.typeId)?.attrSchema ?? null);
+  protected readonly schema = computed(() => this.selection.typeOf(this.typeId())?.attrSchema ?? null);
+
+  /** Required attributes of the type not filled in (e.g. a level's floor elevation): the server would refuse it. */
+  protected missingRequired(): boolean {
+    const required = (this.schema() as { required?: string[] } | null)?.required ?? [];
+    return required.some((name) => this.attrs[name] == null || this.attrs[name] === '');
+  }
 
   protected reset(): void {
-    this.typeId = null;
+    this.typeId.set(null);
     this.name = '';
     this.code = '';
     this.attrs = {};
@@ -86,10 +93,11 @@ export class NodeCreateDialog {
 
   protected create(): void {
     const siteId = this.selection.siteId();
-    if (siteId == null || this.typeId == null) return;
+    const typeId = this.typeId();
+    if (siteId == null || typeId == null) return;
     this.saving.set(true);
     this.api
-      .createNode({ siteId, parentId: this.parent()?.id ?? null, typeId: this.typeId, name: this.name.trim(), code: this.code.trim() || null, attrs: this.attrs })
+      .createNode({ siteId, parentId: this.parent()?.id ?? null, typeId, name: this.name.trim(), code: this.code.trim() || null, attrs: this.attrs })
       .subscribe({
         next: (node) => {
           this.saving.set(false);

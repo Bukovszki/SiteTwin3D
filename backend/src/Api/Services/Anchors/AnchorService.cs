@@ -21,7 +21,7 @@ public static class PositionSources
 /// A box (region / box) is centred on <c>Position</c> + <c>ZRelM</c> (metres above the level floor), sizes in real
 /// metres, heading clockwise from north (spec 8.2).
 /// </summary>
-public record AnchorCreate(string Kind, Point Position, long? LevelId, float? ZRelM, long? PanoramaId, float? YawDeg, float? PitchDeg,
+public record AnchorCreate(string Kind, Point? Position, long? LevelId, float? ZRelM, long? PanoramaId, float? YawDeg, float? PitchDeg,
     string? PositionSource, string? RegionShape = null, float? SizeX = null, float? SizeY = null, float? SizeZ = null, float? HeadingDeg = null,
     long? ModelAssetId = null, string? FeatureRef = null);
 
@@ -31,6 +31,13 @@ public record AnchorUpdate(Point? Position = null, long? LevelId = null, bool Le
 
 /// <summary>An anchor with what the views need of its node (label, type, code).</summary>
 public record AnchorView(Anchor Anchor, string NodeName, string? NodeCode, string TypeCode);
+
+/// <summary>
+/// The single place of a node (user decision: one element, one place): from its model element or box, else its point,
+/// else the approximate place of its info point. <see cref="Source"/> is the kind it came from.
+/// </summary>
+public record PlaceView(long NodeId, string NodeName, string? NodeCode, string TypeCode, string Source, long AnchorId, Point Position, long? LevelId,
+    float ZRelM);
 
 /// <summary>
 /// Anchors: the spatial appearances of a node (spec 8.2, FR-A). The anchor always belongs to the node; display-side ids
@@ -78,11 +85,29 @@ public class AnchorService(AppDbContext db, CurrentUser currentUser)
             throw AppException.BadRequest("anchor.kind_not_supported", "Supported: point, panorama_point, region (box) and model_feature; prisms come later.");
         if (request.LevelId is { } levelId) await RequireLevelAsync(levelId, node.SiteId, ct);
 
+        // One element, one appearance: a node has one point, and one info point per panorama – placing again moves it.
+        var same = request.Kind switch
+        {
+            AnchorKinds.Point => await db.Anchors.Where(a => a.NodeId == nodeId && a.Kind == AnchorKinds.Point).Select(a => (long?)a.Id).FirstOrDefaultAsync(ct),
+            AnchorKinds.PanoramaPoint when request.PanoramaId is { } p =>
+                await db.Anchors.Where(a => a.NodeId == nodeId && a.Kind == AnchorKinds.PanoramaPoint && a.PanoramaId == p).Select(a => (long?)a.Id).FirstOrDefaultAsync(ct),
+            _ => null,
+        };
+        if (same is { } existing)
+            return await UpdateAsync(existing, new AnchorUpdate(Position: request.Position, LevelId: request.LevelId,
+                LevelIdSet: request.Kind == AnchorKinds.Point, ZRelM: request.ZRelM, YawDeg: request.YawDeg, PitchDeg: request.PitchDeg,
+                PositionSource: request.Position is null ? null : request.PositionSource), ct);
+
+        // An info point has no place of its own: without a position it takes the node's place.
+        var position = NodeService.Wgs84(request.Position);
+        if (position is null && request.Kind == AnchorKinds.PanoramaPoint && await PlaceOfAsync(nodeId, ct) is { } place)
+            position = place.Position;
+
         var anchor = new Anchor
         {
             NodeId = nodeId,
             Kind = request.Kind,
-            Position = NodeService.Wgs84(request.Position) ?? throw AppException.BadRequest("anchor.position_required", "position is required."),
+            Position = position ?? throw AppException.BadRequest("anchor.position_required", "position is required."),
             LevelId = request.LevelId,
             ZRelM = request.ZRelM ?? 0,
             Attrs = AttrsWithSource(null, request.PositionSource ?? PositionSources.Manual),
@@ -172,6 +197,35 @@ public class AnchorService(AppDbContext db, CurrentUser currentUser)
         db.Anchors.Remove(anchor);
         await db.SaveChangesAsync(ct);
     }
+
+    /// <summary>The single place of every node with an anchor on the level (or outdoor), or on the whole site.</summary>
+    public async Task<List<PlaceView>> PlacesAsync(long siteId, long? levelId, bool allLevels, CancellationToken ct)
+    {
+        if (!await db.Sites.AnyAsync(s => s.Id == siteId, ct))
+            throw AppException.NotFound("site.not_found", $"Site {siteId} not found.");
+        var anchors = await Views(Visible().Where(a => db.Nodes.Any(n => n.Id == a.NodeId && n.SiteId == siteId))).ToListAsync(ct);
+        return Places(anchors).Where(p => allLevels || p.LevelId == levelId).ToList();
+    }
+
+    public async Task<PlaceView?> PlaceOfAsync(long nodeId, CancellationToken ct) =>
+        Places(await Views(Visible().Where(a => a.NodeId == nodeId)).ToListAsync(ct)).FirstOrDefault();
+
+    private static IEnumerable<PlaceView> Places(IEnumerable<AnchorView> anchors) =>
+        anchors.GroupBy(v => v.Anchor.NodeId).Select(g =>
+        {
+            var best = g.OrderBy(v => PlacePriority(v.Anchor.Kind)).ThenBy(v => v.Anchor.Id).First();
+            return new PlaceView(best.Anchor.NodeId, best.NodeName, best.NodeCode, best.TypeCode, best.Anchor.Kind, best.Anchor.Id,
+                best.Anchor.Position, best.Anchor.LevelId, best.Anchor.ZRelM);
+        });
+
+    /// <summary>The most exact appearance gives the place: model element, box, point, info point.</summary>
+    private static int PlacePriority(string kind) => kind switch
+    {
+        AnchorKinds.ModelFeature => 0,
+        AnchorKinds.Region => 1,
+        AnchorKinds.Point => 2,
+        _ => 3,
+    };
 
     /// <summary>Viewers do not see info points of panoramas they cannot see (not yet approved, FR-P8).</summary>
     private IQueryable<Anchor> Visible() => CanSeeUnapproved

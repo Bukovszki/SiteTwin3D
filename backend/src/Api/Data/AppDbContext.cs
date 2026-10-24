@@ -167,7 +167,13 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options, Curren
             References<ModelAsset, Node>(e, DeleteBehavior.NoAction, nameof(ModelAsset.NodeId));
             e.Property(x => x.Segmented).HasDefaultValue(false).ValueGeneratedNever();
             e.Property(x => x.Attrs).HasDefaultValueSql("'{}'::jsonb");
-            e.ToTable(t => t.HasCheckConstraint("model_asset_kind", "kind IN ('gltf', '3dtiles')"));
+            e.Property(x => x.Status).HasDefaultValue(ModelStatus.Ready).ValueGeneratedNever();
+            e.HasIndex(x => x.Status).HasFilter("status = 'converting'").HasDatabaseName("model_asset_converting");
+            e.ToTable(t =>
+            {
+                t.HasCheckConstraint("model_asset_kind", "kind IN ('gltf', '3dtiles')");
+                t.HasCheckConstraint("model_asset_status", "status IN ('ready', 'converting', 'failed')");
+            });
         });
 
         modelBuilder.Entity<Floorplan>(e =>
@@ -206,6 +212,9 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options, Curren
             e.Property(x => x.Position).HasColumnType("geometry(Point, 4326)");
             e.Property(x => x.Attrs).HasDefaultValueSql("'{}'::jsonb");
             e.HasIndex(x => new { x.ModelAssetId, x.FeatureRef }).HasDatabaseName("anchor_feature");
+            // One element, one appearance (user decision): one info point per panorama, one point per node.
+            e.HasIndex(x => new { x.NodeId, x.PanoramaId }).IsUnique().HasFilter("kind = 'panorama_point'").HasDatabaseName("anchor_one_info_point_per_panorama");
+            e.HasIndex(x => x.NodeId).IsUnique().HasFilter("kind = 'point'").HasDatabaseName("anchor_one_point");
             e.HasIndex(x => x.Position).HasMethod("gist");
             // Spec 8.2, with explicit IS NOT NULL: a comparison with NULL is NULL, and a CHECK that evaluates to
             // NULL passes – without them a box without sizes or a prism without z_max would be accepted.

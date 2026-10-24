@@ -45,6 +45,8 @@ public static class NodeEndpoints
         api.MapGet("/sites/{siteId:long}/nodes", Tree).WithTags("Nodes").RequireAuthorization(Policies.Member)
             .WithSummary("Tree or subtree, flat (build it from parentId): aspect filters the tree, root the subtree, depth limits the levels");
 
+        api.MapGet("/sites/{siteId:long}/placements", Placements).WithTags("Nodes").RequireAuthorization(Policies.Member)
+            .WithSummary("Where every node of the functional tree is (located_in, else the smallest location box): it shows under that place in the location tree");
         api.MapPost("/sites/{siteId:long}/import/attributes", Import).WithTags("Nodes").RequireAuthorization(Policies.Editor)
             .WithSummary("Bulk import of technical data (rows read from CSV/XLSX by the client): all or nothing, every error at once");
 
@@ -162,6 +164,9 @@ public static class NodeEndpoints
 
     private static async Task<Ok<NodeState>> State(long id, DateOnly asOf, HistoryService history, CancellationToken ct) =>
         TypedResults.Ok(await history.StateAsync(id, asOf, ct));
+
+    private static async Task<Ok<List<Placement>>> Placements(long siteId, LocationService locations, CancellationToken ct) =>
+        TypedResults.Ok(await locations.PlacementsAsync(siteId, ct));
 
     private static async Task<Ok<NodeMembers>> Members(long id, LocationService locations, CancellationToken ct) =>
         TypedResults.Ok(await locations.MembersAsync(id, ct));
