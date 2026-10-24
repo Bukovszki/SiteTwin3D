@@ -101,6 +101,8 @@ export class PanoramaViewer {
   readonly navigate = output<number>();
   /** An info point: select its node (FR-A6). */
   readonly infoPointClicked = output<number>();
+  /** An info point dragged to a new place on the picture (editors): its new image angles. */
+  readonly infoPointMoved = output<{ anchorId: number } & PanoramaClick>();
 
   protected readonly error = signal<string | null>(null);
 
@@ -120,6 +122,8 @@ export class PanoramaViewer {
   readonly highlightNodeId = signal<number | null>(null);
   /** Boxes of the selected node (region anchors): drawn where they stand, if on the panorama's level (M6). */
   readonly boxes = signal<Anchor[]>([]);
+  /** Info points may be dragged (editing modes). */
+  readonly editable = signal(false);
 
   constructor() {
     afterNextRender(() => this.create());
@@ -316,12 +320,32 @@ export class PanoramaViewer {
     this.handler = new ScreenSpaceEventHandler(scene.canvas);
     let last: Cartesian2 | null = null;
     let moved = false;
+    // Dragging an info point (editors) instead of turning the view.
+    let dragged: { entity: Entity; anchorId: number; angles: PanoramaClick | null } | null = null;
     this.handler.setInputAction((e: { position: Cartesian2 }) => {
       last = Cartesian2.clone(e.position);
       moved = false;
+      const entity = this.editable() ? this.pickedEntity(e.position) : null;
+      dragged = entity?.id.startsWith('info:')
+        ? { entity, anchorId: Number(entity.id.split(':')[2]), angles: null }
+        : null;
     }, ScreenSpaceEventType.LEFT_DOWN);
     this.handler.setInputAction((e: { endPosition: Cartesian2 }) => {
       if (!last) return;
+      if (dragged) {
+        if (Math.abs(e.endPosition.x - last.x) + Math.abs(e.endPosition.y - last.y) > 2)
+          moved = true;
+        if (!moved) return;
+        const angles = this.anglesAt(e.endPosition);
+        if (!angles || !this.panorama) return;
+        dragged.angles = angles;
+        dragged.entity.position = this.direction(
+          (this.panorama.headingDeg ?? 0) + angles.yaw,
+          angles.pitch,
+          INFO_DISTANCE,
+        ) as never;
+        return;
+      }
       const fov = CesiumMath.toDegrees((this.viewer!.camera.frustum as PerspectiveFrustum).fov);
       const width = scene.canvas.clientWidth || 1;
       const dx = e.endPosition.x - last.x;
@@ -335,7 +359,11 @@ export class PanoramaViewer {
     }, ScreenSpaceEventType.MOUSE_MOVE);
     this.handler.setInputAction((e: { position: Cartesian2 }) => {
       last = null;
-      if (!moved) this.click(e.position);
+      const drop = dragged;
+      dragged = null;
+      if (drop?.angles && moved)
+        this.infoPointMoved.emit({ anchorId: drop.anchorId, ...drop.angles });
+      else if (!moved) this.click(e.position);
     }, ScreenSpaceEventType.LEFT_UP);
     this.handler.setInputAction((delta: number) => {
       const frustum = this.viewer!.camera.frustum as PerspectiveFrustum;
@@ -408,11 +436,14 @@ export class PanoramaViewer {
     });
   }
 
-  /** Screen point → direction in the local east-north-up frame → image angles. */
+  private pickedEntity(position: Cartesian2): Entity | null {
+    const picked = this.viewer?.scene.pick(position) as { id?: Entity } | undefined;
+    return picked?.id instanceof Entity ? picked.id : null;
+  }
+
   private click(position: Cartesian2): void {
     if (!this.viewer || !this.panorama) return;
-    const picked = this.viewer.scene.pick(position) as { id?: Entity } | undefined;
-    const id = picked?.id instanceof Entity ? picked.id.id : null;
+    const id = this.pickedEntity(position)?.id ?? null;
     if (id?.startsWith('nav:')) {
       this.navigate.emit(Number(id.slice(4)));
       return;
@@ -421,8 +452,15 @@ export class PanoramaViewer {
       this.infoPointClicked.emit(Number(id.split(':')[1]));
       return;
     }
+    const angles = this.anglesAt(position);
+    if (angles) this.clicked.emit(angles);
+  }
+
+  /** Screen point → direction in the local east-north-up frame → image angles. */
+  private anglesAt(position: Cartesian2): PanoramaClick | null {
+    if (!this.viewer || !this.panorama) return null;
     const ray = this.viewer.camera.getPickRay(position);
-    if (!ray) return;
+    if (!ray) return null;
     const toLocal = Matrix4.inverseTransformation(
       Transforms.eastNorthUpToFixedFrame(this.center),
       new Matrix4(),
@@ -431,10 +469,7 @@ export class PanoramaViewer {
     Cartesian3.normalize(local, local);
     const azimuth = normalizeHeading(CesiumMath.toDegrees(Math.atan2(local.x, local.y)));
     const elevation = CesiumMath.toDegrees(Math.asin(Math.max(-1, Math.min(1, local.z))));
-    this.clicked.emit({
-      yaw: normalizeYaw(azimuth - (this.panorama.headingDeg ?? 0)),
-      pitch: elevation,
-    });
+    return { yaw: normalizeYaw(azimuth - (this.panorama.headingDeg ?? 0)), pitch: elevation };
   }
 
   /** Turns the camera to an absolute heading (e.g. after calibration). */

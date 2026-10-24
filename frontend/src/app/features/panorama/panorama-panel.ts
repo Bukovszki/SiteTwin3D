@@ -4,6 +4,7 @@ import { Button } from 'primeng/button';
 import { Message } from 'primeng/message';
 import { Tag } from 'primeng/tag';
 import { Tooltip } from 'primeng/tooltip';
+import { AnchorEditService } from '../../core/anchors/anchor-edit.service';
 import { ApiService } from '../../core/api/api.service';
 import { firstValueFrom } from 'rxjs';
 import { Anchor, Panorama, PanoramaNeighbour } from '../../core/api/models';
@@ -44,6 +45,15 @@ import { PrivacyReviewDialog } from './privacy-review-dialog';
             size="small"
             [pTooltip]="m.infoPoint.place"
             (onClick)="startInfoPoint()"
+            [disabled]="!p.imageUrl || edits.active()"
+          />
+          <p-button
+            icon="pi pi-arrows-alt"
+            [text]="!edits.active()"
+            [outlined]="edits.active()"
+            size="small"
+            [pTooltip]="edits.active() ? m.anchorEdit.stop : m.anchorEdit.start"
+            (onClick)="edits.toggle()"
             [disabled]="!p.imageUrl"
           />
         }
@@ -114,7 +124,8 @@ import { PrivacyReviewDialog } from './privacy-review-dialog';
         #viewer
         (clicked)="onClick($event)"
         (navigate)="selection.openPanorama($event)"
-        (infoPointClicked)="selection.selectNode($event)"
+        (infoPointClicked)="selection.focusNode($event)"
+        (infoPointMoved)="moveInfoPoint($event)"
       />
     </div>
     @if (can.prepare() && panorama(); as p) {
@@ -158,6 +169,7 @@ export class PanoramaPanel {
   protected readonly can = inject(Permissions);
   protected readonly selection = inject(SelectionService);
   private readonly api = inject(ApiService);
+  protected readonly edits = inject(AnchorEditService);
   private readonly tools = inject(MapToolsService);
   private readonly toasts = inject(MessageService);
   private readonly confirm = inject(ConfirmationService);
@@ -193,6 +205,7 @@ export class PanoramaPanel {
     // Mutual selection (FR-G3): the selected node's info point is highlighted and turned to.
     effect(() => {
       const nodeId = this.selection.nodeId();
+      this.selection.focusTick();
       untracked(() => {
         this.viewer().highlightNodeId.set(nodeId);
         const point = this.infoPoints().find((a) => a.nodeId === nodeId);
@@ -208,6 +221,32 @@ export class PanoramaPanel {
     });
   }
 
+  /** Info points can be dragged only in an editing session (AnchorEditService), never by accident. */
+  private readonly editable = effect(() => {
+    const editable = this.edits.active();
+    untracked(() => this.viewer().editable.set(editable));
+  });
+
+  /** The markers show the staged (not yet accepted) image angles of the session. */
+  private readonly showStaged = effect(() => {
+    const pending = this.edits.pending();
+    const points = this.infoPoints().map((a) => {
+      const patch = pending.get(a.id);
+      return patch
+        ? { ...a, yawDeg: patch.yawDeg ?? a.yawDeg, pitchDeg: patch.pitchDeg ?? a.pitchDeg }
+        : a;
+    });
+    untracked(() => this.viewer().infoPoints.set(points));
+  });
+
+  /** An info point dragged on the picture: staged until the session is accepted (its floorplan place stays). */
+  protected moveInfoPoint(move: { anchorId: number; yaw: number; pitch: number }): void {
+    this.edits.stage(move.anchorId, {
+      yawDeg: Math.round(move.yaw * 100) / 100,
+      pitchDeg: Math.round(move.pitch * 100) / 100,
+    });
+  }
+
   private loadMarkers(id: number): void {
     this.api.neighbours(id).subscribe((n) => {
       this.neighbours.set(n);
@@ -215,7 +254,6 @@ export class PanoramaPanel {
     });
     this.api.panoramaAnchors(id).subscribe((a) => {
       this.infoPoints.set(a);
-      this.viewer().infoPoints.set(a);
     });
   }
 

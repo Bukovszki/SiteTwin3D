@@ -3,6 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import {
   Anchor,
+  ChangeView,
   DrawLayer,
   DrawTransaction,
   ElementCheck,
@@ -21,6 +22,7 @@ import {
   ModelUploadTicket,
   Node,
   NodeMembers,
+  NodeState,
   NodeType,
   Panorama,
   PanoramaNeighbour,
@@ -97,6 +99,17 @@ export class ApiService {
   /** Partial update; `parentId: null` moves the node to the root. */
   updateNode(id: number, patch: Record<string, unknown>, context?: HttpContext): Observable<Node> {
     return this.http.patch<Node>(`${API}/nodes/${id}`, patch, { context });
+  }
+  /** Finalizes the node (subtree: with all below it); its state becomes the baseline valid from validFrom. */
+  finalize(id: number, subtree: boolean, validFrom: string | null): Observable<{ finalized: number }> {
+    return this.http.post<{ finalized: number }>(`${API}/nodes/${id}/finalize`, { subtree, validFrom });
+  }
+  history(id: number): Observable<ChangeView[]> {
+    return this.http.get<ChangeView[]>(`${API}/nodes/${id}/history`);
+  }
+  /** The node as valid on a day (yyyy-MM-dd). */
+  stateOn(id: number, asOf: string): Observable<NodeState> {
+    return this.http.get<NodeState>(`${API}/nodes/${id}/state`, { params: { asOf } });
   }
   /** The node and its subtree with the place of each element (M8). */
   members(id: number): Observable<NodeMembers> {

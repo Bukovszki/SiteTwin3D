@@ -5,6 +5,7 @@ using Api.Endpoints;
 using Api.Services;
 using Api.Services.Auth;
 using Api.Services.Hierarchy;
+using Api.Services.History;
 using Api.Services.Hosting;
 using Api.Services.Maps;
 using Api.Services.Locations;
@@ -59,6 +60,8 @@ builder.Services.AddScoped<PanoramaLinkService>();
 builder.Services.AddScoped<ModelService>();
 builder.Services.AddScoped<FloorGeometryService>();
 builder.Services.AddScoped<LocationService>();
+builder.Services.AddScoped<ChangeContext>();
+builder.Services.AddScoped<HistoryService>();
 builder.Services.AddScoped<AnchorService>();
 builder.Services.AddScoped<DrawService>();
 if (builder.Configuration.GetValue("Privacy:RunWorker", true)) builder.Services.AddHostedService<PanoramaWorker>();
@@ -85,6 +88,7 @@ else if (!DeploymentSetup.BehindReverseProxy(app.Configuration))
     app.UseHttpsRedirection();
 }
 
+app.UseMiddleware<ChangeContextMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 

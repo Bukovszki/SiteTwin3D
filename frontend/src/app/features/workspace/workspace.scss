@@ -142,6 +142,20 @@
   min-height: 0;
 }
 
+.edit-session {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.75rem;
+  background: var(--p-amber-50, #fffbeb);
+  border-bottom: 1px solid var(--p-amber-300, #fcd34d);
+  font-size: 0.85rem;
+
+  .spacer {
+    flex: 1;
+  }
+}
+
 .viewport {
   position: relative;
   display: flex;

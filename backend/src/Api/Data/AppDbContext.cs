@@ -2,6 +2,7 @@ using Api.Model;
 using System.Linq.Expressions;
 using Api.Services;
 using Api.Services.Auth;
+using Api.Services.History;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -22,7 +23,8 @@ namespace Api.Data;
 /// </list>
 /// A new organization-owned table MUST be registered with <see cref="OrganizationOwned{T}"/> (a test checks it).
 /// </summary>
-public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser? currentUser = null) : DbContext(options)
+public partial class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser? currentUser = null, ChangeContext? changes = null)
+    : DbContext(options)
 {
     /// <summary>The filter value, evaluated per query.</summary>
     private long? CurrentOrganizationId => currentUser?.OrganizationId;
@@ -43,6 +45,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser? c
     public DbSet<DrawLayer> DrawLayers => Set<DrawLayer>();
     public DbSet<DrawRecord> DrawRecords => Set<DrawRecord>();
     public DbSet<DrawGeometry> DrawGeometries => Set<DrawGeometry>();
+    public DbSet<ChangeEntry> ChangeEntries => Set<ChangeEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -251,6 +254,21 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser? c
             e.HasIndex(x => x.Geom).HasMethod("gist");
         });
 
+        modelBuilder.Entity<ChangeEntry>(e =>
+        {
+            e.ToTable("change_entry");
+            // Only the organization and the site: the history outlives the node and its anchors.
+            e.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+            References<ChangeEntry, Site>(e, DeleteBehavior.Cascade, nameof(ChangeEntry.SiteId));
+            e.HasIndex(x => new { x.NodeId, x.ValidFrom });
+            e.HasIndex(x => new { x.Entity, x.EntityId });
+            e.ToTable(t =>
+            {
+                t.HasCheckConstraint("change_entry_entity", "entity IN ('node', 'anchor')");
+                t.HasCheckConstraint("change_entry_action", "action IN ('finalize', 'create', 'update', 'delete')");
+            });
+        });
+
         // Organization (spec 3.1) and, for site-restricted users, the readable sites (spec 3.2): rows of other sites are
         // simply not found. Tables without a site column reach their site through the node, level or drawing layer.
         OrganizationOwned<UserSiteRole>(modelBuilder, x => true);
@@ -258,6 +276,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser? c
         OrganizationOwned<Node>(modelBuilder, x => ReadableSites == null || ReadableSites.Contains(x.SiteId));
         OrganizationOwned<ModelAsset>(modelBuilder, x => ReadableSites == null || ReadableSites.Contains(x.SiteId));
         OrganizationOwned<DrawLayer>(modelBuilder, x => ReadableSites == null || ReadableSites.Contains(x.SiteId));
+        OrganizationOwned<ChangeEntry>(modelBuilder, x => ReadableSites == null || ReadableSites.Contains(x.SiteId));
         OrganizationOwned<MapLayer>(modelBuilder, x => ReadableSites == null || x.SiteId == null || ReadableSites.Contains(x.SiteId.Value));
         OrganizationOwned<NodeRelation>(modelBuilder,
             x => ReadableSites == null || Set<Node>().Any(n => n.Id == x.FromId && ReadableSites.Contains(n.SiteId)));
@@ -315,7 +334,25 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, CurrentUser? c
     {
         StampOrganization();
         await CheckEditableSitesAsync(cancellationToken);
-        return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        var recorded = await RecordChangesAsync(cancellationToken);
+        if (recorded.Count == 0) return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+
+        // New anchors get their id on insert: the history rows learn it in a second save, in the same transaction.
+        var own = Database.CurrentTransaction is null ? await Database.BeginTransactionAsync(cancellationToken) : null;
+        try
+        {
+            StampOrganization();
+            var count = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+            foreach (var (entry, entity) in recorded)
+                if (entity is Anchor anchor) entry.EntityId = anchor.Id;
+            await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+            if (own is not null) await own.CommitAsync(cancellationToken);
+            return count;
+        }
+        finally
+        {
+            if (own is not null) await own.DisposeAsync();
+        }
     }
 
     /// <summary>

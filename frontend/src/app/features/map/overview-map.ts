@@ -18,6 +18,7 @@ import { Checkbox } from 'primeng/checkbox';
 import { Message } from 'primeng/message';
 import { Select } from 'primeng/select';
 import { Tooltip } from 'primeng/tooltip';
+import { AnchorEditService } from '../../core/anchors/anchor-edit.service';
 import { ApiService, floorplanWmsUrl, wmsProxyUrl } from '../../core/api/api.service';
 import { Anchor, LevelInfo, MapLayer, Panorama, Site } from '../../core/api/models';
 import { AuthService } from '../../core/auth/auth.service';
@@ -60,6 +61,10 @@ const CONE_LENGTH_M = 8;
             <p-button icon="pi pi-images" [text]="true" size="small" [pTooltip]="m.levels.manage" (onClick)="floorplansOpen.set(true)" />
           }
           <p-button icon="pi pi-camera" [text]="true" size="small" [pTooltip]="m.panorama.upload" (onClick)="uploadOpen.set(true)" />
+        }
+        @if (can.anchors()) {
+          <p-button icon="pi pi-arrows-alt" [text]="!edits.active()" [outlined]="edits.active()" size="small"
+            [pTooltip]="edits.active() ? m.anchorEdit.stop : m.anchorEdit.start" (onClick)="edits.toggle()" />
         }
         <p-button icon="pi pi-pencil" [text]="true" size="small" [pTooltip]="m.drawing.layers" (onClick)="drawingOpen.set(!drawingOpen())" />
       </div>
@@ -152,6 +157,7 @@ export class OverviewMap {
   protected readonly can = inject(Permissions);
   protected readonly selection = inject(SelectionService);
   private readonly api = inject(ApiService);
+  protected readonly edits = inject(AnchorEditService);
   private readonly toasts = inject(MessageService);
   private readonly element = viewChild.required<ElementRef<HTMLDivElement>>('map');
 
@@ -232,6 +238,7 @@ export class OverviewMap {
     });
     effect(() => {
       const nodeId = this.selection.nodeId();
+      this.selection.focusTick();
       untracked(() => {
         this.anchorSource.getFeatures().forEach((f) => f.set('selected', f.get('nodeId') === nodeId));
         if (nodeId != null) this.showNodeAnchors(nodeId);
@@ -437,9 +444,10 @@ export class OverviewMap {
     });
     // Editors move panoramas by dragging their marker (position stored in WGS84).
     {
-      // Dragging follows the mode at the moment of the drag: panoramas in preparation, anchors in both editing modes.
+      // Dragging follows the state at the moment of the drag: panoramas in preparation, anchors only in an editing
+      // session (AnchorEditService) – a stray drag never moves an anchor.
       this.translate = new Translate({
-        layers: (l) => (l.getSource() === this.panoramaSource && this.can.prepare()) || (l.getSource() === this.anchorSource && this.can.anchors()),
+        layers: (l) => (l.getSource() === this.panoramaSource && this.can.prepare()) || (l.getSource() === this.anchorSource && this.edits.active()),
         hitTolerance: 4,
       });
       let start: number[] = [];
@@ -457,10 +465,8 @@ export class OverviewMap {
         }
         const [lon, lat] = toLonLat((feature.getGeometry() as Point).getCoordinates());
         if (anchorId != null) {
-          this.api.updateAnchor(anchorId, { position: { type: 'Point', coordinates: [lon, lat] } }).subscribe({
-            next: () => this.toasts.add({ severity: 'success', summary: this.m.infoPoint.moved, life: 2000 }),
-            error: () => this.selection.changed(),
-          });
+          // Staged: written only when the session is accepted.
+          this.edits.stage(anchorId, { position: { type: 'Point', coordinates: [lon, lat] } });
           return;
         }
         this.api.updatePanorama(feature.get('panoramaId') as number, { position: { type: 'Point', coordinates: [lon, lat] } }).subscribe({

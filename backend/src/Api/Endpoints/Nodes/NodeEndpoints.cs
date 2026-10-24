@@ -3,6 +3,7 @@ using Api.Model;
 using Api.Services;
 using Api.Services.Auth;
 using Api.Services.Hierarchy;
+using Api.Services.History;
 using Api.Services.Locations;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Http.Json;
@@ -12,11 +13,12 @@ using NetTopologySuite.Geometries;
 namespace Api.Endpoints.Nodes;
 
 /// <summary>A node of the hierarchy; <see cref="Path"/> is the dot-separated id chain from the root.</summary>
+/// <summary>A node; <see cref="FinalizedAt"/> null: draft (free editing), else changes need a reason and are kept in history.</summary>
 public record NodeDto(long Id, long SiteId, long? ParentId, string Path, int Depth, long TypeId, string TypeCode, string Aspect,
-    string? Code, string Name, int SortOrder, Geometry? Geom, JsonElement Attrs)
+    string? Code, string Name, int SortOrder, Geometry? Geom, JsonElement Attrs, DateTime? FinalizedAt = null)
 {
     public static NodeDto From(Node n) => new(n.Id, n.SiteId, n.ParentId, n.Path.ToString(), NodeService.Depth(n.Path), n.TypeId, n.Type.Code,
-        n.Type.Aspect, n.Code, n.Name, n.SortOrder, n.Geom, n.Attrs.RootElement.Clone());
+        n.Type.Aspect, n.Code, n.Name, n.SortOrder, n.Geom, n.Attrs.RootElement.Clone(), n.FinalizedAt);
 }
 
 /// <summary>Grid row: the node plus the kinds of its anchors (FR-G4: what is still unassigned).</summary>
@@ -25,6 +27,10 @@ public record GridRowDto(NodeDto Node, List<string> AnchorKinds, bool Linked);
 public record GridPageDto(int Total, List<GridRowDto> Rows);
 
 public record LocationRequest(long? LocationId);
+
+public record FinalizeRequest(bool? Subtree, DateOnly? ValidFrom);
+
+public record FinalizeResult(int Finalized);
 
 public record RelationDto(long FromId, long ToId, string Kind)
 {
@@ -62,6 +68,12 @@ public static class NodeEndpoints
             .WithSummary("New relation from this node (kind e.g. located_in, connected_to, feeds)");
         group.MapDelete("/{id:long}/relations", DeleteRelation).RequireAuthorization(Policies.Editor)
             .WithSummary("Delete the relation from this node to toId of the given kind");
+        group.MapPost("/{id:long}/finalize", FinalizeNode).RequireAuthorization(Policies.Editor)
+            .WithSummary("Finalizes the node (subtree=true: with its subtree): its state becomes the baseline valid from validFrom (default today); from then on changes need a reason (headers X-Change-Reason, X-Change-Valid-From) and are kept in history");
+        group.MapGet("/{id:long}/history", ChangesOf).RequireAuthorization(Policies.Member)
+            .WithSummary("Changes of a finalized node and its anchors: valid-from day, who and when recorded, reason, before / after");
+        group.MapGet("/{id:long}/state", State).RequireAuthorization(Policies.Member)
+            .WithSummary("The node's descriptive data and anchors as valid on asOf (yyyy-MM-dd), rebuilt from the history");
         group.MapGet("/{id:long}/members", Members).RequireAuthorization(Policies.Member)
             .WithSummary("The node and its whole subtree (e.g. a process line) with where each element is: located_in relation, else the smallest location box containing its anchor");
         group.MapPut("/{id:long}/location", SetLocation).RequireAuthorization(Policies.Editor)
@@ -141,6 +153,15 @@ public static class NodeEndpoints
         var relation = await nodes.AddRelationAsync(id, request, ct);
         return TypedResults.Created($"/api/v1/nodes/{id}/relations", RelationDto.From(relation));
     }
+
+    private static async Task<Ok<FinalizeResult>> FinalizeNode(long id, FinalizeRequest request, HistoryService history, CancellationToken ct) =>
+        TypedResults.Ok(new FinalizeResult(await history.FinalizeAsync(id, request.Subtree ?? false, request.ValidFrom, ct)));
+
+    private static async Task<Ok<List<ChangeView>>> ChangesOf(long id, HistoryService history, CancellationToken ct) =>
+        TypedResults.Ok(await history.HistoryAsync(id, ct));
+
+    private static async Task<Ok<NodeState>> State(long id, DateOnly asOf, HistoryService history, CancellationToken ct) =>
+        TypedResults.Ok(await history.StateAsync(id, asOf, ct));
 
     private static async Task<Ok<NodeMembers>> Members(long id, LocationService locations, CancellationToken ct) =>
         TypedResults.Ok(await locations.MembersAsync(id, ct));

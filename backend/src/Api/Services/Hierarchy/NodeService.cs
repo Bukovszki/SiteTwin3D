@@ -155,8 +155,14 @@ public class NodeService(AppDbContext db, Auth.CurrentUser currentUser)
         if (hasChildren && !recursive)
             throw AppException.Conflict("node.has_children", "The node has children: delete the subtree explicitly (recursive=true).");
 
+        // Finalized nodes leave history (with a reason) before they go; their anchors as tracked deletes.
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        var subtree = db.Nodes.Where(n => n.Path.IsDescendantOf(path));
+        await db.RemoveFinalizedAnchorsAsync(db.Anchors.Where(a => subtree.Any(n => n.Id == a.NodeId)), ct);
+        await db.RecordNodeDeletionsAsync(await subtree.Where(n => n.FinalizedAt != null).ToListAsync(ct), ct);
         // One statement: the parent references inside the subtree are checked at its end.
-        await db.Nodes.Where(n => n.Path.IsDescendantOf(path)).ExecuteDeleteAsync(ct);
+        await subtree.ExecuteDeleteAsync(ct);
+        await tx.CommitAsync(ct);
     }
 
     public async Task<List<NodeRelation>> RelationsAsync(long id, CancellationToken ct)

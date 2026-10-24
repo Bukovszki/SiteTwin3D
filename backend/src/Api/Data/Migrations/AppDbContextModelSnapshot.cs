@@ -233,6 +233,92 @@ namespace Api.Data.Migrations
                     b.ToTable("app_user", (string)null);
                 });
 
+            modelBuilder.Entity("Api.Model.ChangeEntry", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("action");
+
+                    b.Property<JsonDocument>("After")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("after");
+
+                    b.Property<JsonDocument>("Before")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("before");
+
+                    b.Property<string>("Entity")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("entity");
+
+                    b.Property<long>("EntityId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("entity_id");
+
+                    b.Property<long>("NodeId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("node_id");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("Reason")
+                        .HasColumnType("text")
+                        .HasColumnName("reason");
+
+                    b.Property<DateTime>("RecordedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("recorded_at");
+
+                    b.Property<long?>("RecordedBy")
+                        .HasColumnType("bigint")
+                        .HasColumnName("recorded_by");
+
+                    b.Property<string>("RecordedByName")
+                        .HasColumnType("text")
+                        .HasColumnName("recorded_by_name");
+
+                    b.Property<long>("SiteId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("site_id");
+
+                    b.Property<DateOnly>("ValidFrom")
+                        .HasColumnType("date")
+                        .HasColumnName("valid_from");
+
+                    b.HasKey("Id")
+                        .HasName("pk_change_entry");
+
+                    b.HasIndex("OrganizationId")
+                        .HasDatabaseName("ix_change_entry_organization_id");
+
+                    b.HasIndex("Entity", "EntityId")
+                        .HasDatabaseName("ix_change_entry_entity_entity_id");
+
+                    b.HasIndex("NodeId", "ValidFrom")
+                        .HasDatabaseName("ix_change_entry_node_id_valid_from");
+
+                    b.HasIndex("SiteId", "OrganizationId")
+                        .HasDatabaseName("ix_change_entry_site_id_organization_id");
+
+                    b.ToTable("change_entry", null, t =>
+                        {
+                            t.HasCheckConstraint("change_entry_action", "action IN ('finalize', 'create', 'update', 'delete')");
+
+                            t.HasCheckConstraint("change_entry_entity", "entity IN ('node', 'anchor')");
+                        });
+                });
+
             modelBuilder.Entity("Api.Model.DrawGeometry", b =>
                 {
                     b.Property<long>("Id")
@@ -638,6 +724,14 @@ namespace Api.Data.Migrations
                     b.Property<string>("Code")
                         .HasColumnType("text")
                         .HasColumnName("code");
+
+                    b.Property<DateTime?>("FinalizedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("finalized_at");
+
+                    b.Property<long?>("FinalizedBy")
+                        .HasColumnType("bigint")
+                        .HasColumnName("finalized_by");
 
                     b.Property<Geometry>("Geom")
                         .HasColumnType("geometry(Geometry, 4326)")
@@ -1115,6 +1209,24 @@ namespace Api.Data.Migrations
                         .HasConstraintName("fk_app_user_organization_organization_id");
 
                     b.Navigation("Organization");
+                });
+
+            modelBuilder.Entity("Api.Model.ChangeEntry", b =>
+                {
+                    b.HasOne("Api.Model.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_change_entry_organization_organization_id");
+
+                    b.HasOne("Api.Model.Site", null)
+                        .WithMany()
+                        .HasForeignKey("SiteId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_change_entry_site_site_id_organization_id");
                 });
 
             modelBuilder.Entity("Api.Model.DrawGeometry", b =>

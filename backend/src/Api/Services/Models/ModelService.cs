@@ -172,6 +172,8 @@ public partial class ModelService(AppDbContext db, IObjectStorage storage, Curre
     {
         var asset = await db.ModelAssets.FirstOrDefaultAsync(m => m.Id == id, ct)
             ?? throw AppException.NotFound("model.not_found", $"Model {id} not found.");
+        // Its element anchors go with it; those of finalized records are recorded (reason) instead of cascading silently.
+        await db.RemoveFinalizedAnchorsAsync(db.Anchors.Where(a => a.ModelAssetId == id), ct);
         db.ModelAssets.Remove(asset);
         await db.SaveChangesAsync(ct);
         // Boxes (region anchors) do not depend on the model and stay valid for a replacement survey (spec 9.1).

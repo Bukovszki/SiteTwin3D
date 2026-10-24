@@ -9,7 +9,8 @@ import { Select } from 'primeng/select';
 import { Tag } from 'primeng/tag';
 import { ApiService } from '../../core/api/api.service';
 import { errorCode, silent } from '../../core/api/errors';
-import { Anchor, Node } from '../../core/api/models';
+import { Anchor, ChangeView, Node, NodeState } from '../../core/api/models';
+import { today } from '../../core/history/change-reason';
 import { AuthService } from '../../core/auth/auth.service';
 import { Permissions } from '../../core/auth/permissions';
 import { MESSAGES } from '../../core/i18n/messages';
@@ -36,13 +37,68 @@ import { SchemaForm } from './schema-form';
       <form class="form-grid body" (ngSubmit)="save()">
         <div class="field">
           <label>{{ m.node.type }}</label>
-          <span>
+          <span class="type-line">
             {{ type()?.name ?? n.typeCode }}
             @if (linked()) {
               <p-tag severity="info" icon="pi pi-link" [value]="m.grid.linked" />
             }
+            @if (n.finalizedAt) {
+              <p-tag
+                severity="success"
+                icon="pi pi-lock"
+                [value]="m.history.finalized(day(n.finalizedAt))"
+              />
+            } @else {
+              <p-tag severity="secondary" [value]="m.history.draft" />
+              @if (can.anchors()) {
+                <p-button
+                  [label]="m.history.finalize"
+                  icon="pi pi-lock"
+                  size="small"
+                  [text]="true"
+                  (onClick)="finalizing.set(!finalizing())"
+                />
+              }
+            }
           </span>
         </div>
+        @if (finalizing() && !n.finalizedAt) {
+          <div class="finalize">
+            <small class="muted">{{ m.history.finalizeHint }}</small>
+            @if (selection.members()?.members?.length) {
+              <label class="check">
+                <input type="checkbox" name="fin-subtree" [(ngModel)]="finalizeSubtree" />
+                {{ m.history.finalizeSubtree(selection.members()!.members.length) }}
+              </label>
+            }
+            <div class="field">
+              <label for="fin-from">{{ m.history.finalizeValidFrom }}</label>
+              <input
+                pInputText
+                id="fin-from"
+                name="fin-from"
+                type="date"
+                [max]="todayIso"
+                [(ngModel)]="finalizeFrom"
+              />
+            </div>
+            <div class="actions">
+              <p-button
+                [label]="m.common.cancel"
+                severity="secondary"
+                [text]="true"
+                size="small"
+                (onClick)="finalizing.set(false)"
+              />
+              <p-button
+                [label]="m.history.finalize"
+                icon="pi pi-lock"
+                size="small"
+                (onClick)="finalize(n)"
+              />
+            </div>
+          </div>
+        }
         <div class="row">
           <div class="field">
             <label for="ds-name">{{ m.node.name }}</label>
@@ -183,6 +239,77 @@ import { SchemaForm } from './schema-form';
           <small class="muted">{{ m.infoPoint.noAnchors }}</small>
         }
 
+        @if (n.finalizedAt) {
+          <h4>{{ m.history.title }}</h4>
+          <div class="state-on">
+            <label for="ds-state-on">{{ m.history.stateOn }}</label>
+            <input
+              pInputText
+              id="ds-state-on"
+              name="ds-state-on"
+              type="date"
+              [max]="todayIso"
+              [ngModel]="stateDay()"
+              (ngModelChange)="showState($event)"
+            />
+          </div>
+          @if (state(); as st) {
+            <div class="state">
+              @if (!st.tracked) {
+                <small class="muted">{{ m.history.stateUntracked }}</small>
+              } @else if (st.node) {
+                <table class="kv">
+                  <tr>
+                    <th>{{ m.node.name }}</th>
+                    <td>{{ st.node.name }}</td>
+                  </tr>
+                  <tr>
+                    <th>{{ m.node.code }}</th>
+                    <td>{{ st.node.code ?? m.common.none }}</td>
+                  </tr>
+                  @for (entry of st.node.attrs | keyvalue; track entry.key) {
+                    <tr>
+                      <th>{{ entry.key }}</th>
+                      <td>{{ entry.value ?? m.common.none }}</td>
+                    </tr>
+                  }
+                </table>
+                <small class="muted"
+                  >{{ m.history.anchorCount(st.anchors.length) }}:
+                  @for (a of st.anchors; track a.id) {
+                    {{ m.infoPoint.kinds[a.kind] }}
+                    @if (!$last) {
+                      ,
+                    }
+                  }
+                </small>
+              }
+            </div>
+          }
+          <ul class="history">
+            @for (c of history(); track c.id) {
+              <li>
+                <div>
+                  <b>{{ m.history.actions[c.action] }} – {{ m.history.entities[c.entity] }}</b>
+                  @if (c.fields.length) {
+                    <span class="muted">({{ fieldNames(c) }})</span>
+                  }
+                  <span class="spacer"></span>
+                  <span class="valid">{{ m.history.validFromShort }} {{ c.validFrom }}</span>
+                </div>
+                @if (c.reason) {
+                  <div class="reason">{{ c.reason }}</div>
+                }
+                <small class="muted">{{
+                  m.history.recorded(c.recordedByName ?? '?', time(c.recordedAt))
+                }}</small>
+              </li>
+            } @empty {
+              <small class="muted">{{ m.history.empty }}</small>
+            }
+          </ul>
+        }
+
         @if (can.prepare()) {
           <div class="actions">
             <p-button
@@ -262,6 +389,55 @@ import { SchemaForm } from './schema-form';
         flex: 1;
       }
     }
+    .type-line {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .finalize,
+    .state {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      padding: 0.6rem;
+      border: 1px solid var(--p-content-border-color);
+      border-radius: 6px;
+      background: var(--p-content-hover-background);
+    }
+    .check,
+    .state-on {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .history {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      font-size: 0.85rem;
+      li {
+        padding: 0.4rem 0.5rem;
+        border-left: 3px solid var(--p-primary-color);
+        background: var(--p-content-hover-background);
+        > div:first-child {
+          display: flex;
+          gap: 0.35rem;
+        }
+        .spacer {
+          flex: 1;
+        }
+        .valid {
+          white-space: nowrap;
+        }
+        .reason {
+          font-style: italic;
+        }
+      }
+    }
     .actions {
       display: flex;
       justify-content: flex-end;
@@ -285,6 +461,13 @@ export class DatasheetPanel {
   protected readonly linkedError = signal<string | null>(null);
   protected readonly saving = signal(false);
   protected readonly anchors = signal<Anchor[]>([]);
+  protected readonly history = signal<ChangeView[]>([]);
+  protected readonly state = signal<NodeState | null>(null);
+  protected readonly stateDay = signal<string | null>(null);
+  protected readonly finalizing = signal(false);
+  protected finalizeSubtree = false;
+  protected finalizeFrom = today();
+  protected readonly todayIso = today();
   protected name = '';
   protected code = '';
   protected attrs: Record<string, unknown> = {};
@@ -331,6 +514,9 @@ export class DatasheetPanel {
         this.show(node);
         this.api.ancestors(id).subscribe((ancestors) => this.ancestors.set(ancestors));
         this.api.nodeAnchors(id).subscribe((anchors) => this.anchors.set(anchors));
+        if (node.finalizedAt)
+          this.api.history(id).subscribe((history) => this.history.set(history));
+        if (node.finalizedAt && this.stateDay()) this.showState(this.stateDay());
         if (node.attrs.mapmanager_ref) this.loadLinked(node.id);
       },
       error: () => this.selection.selectNode(null),
@@ -356,6 +542,14 @@ export class DatasheetPanel {
     this.selection.node.set(node);
     this.ancestors.set([]);
     this.anchors.set([]);
+    if (node?.id !== this.node()?.id) {
+      this.history.set([]);
+      this.state.set(null);
+      this.stateDay.set(null);
+      this.finalizing.set(false);
+      this.finalizeSubtree = false;
+      this.finalizeFrom = today();
+    }
     this.linkedAttrs.set(null);
     this.linkedError.set(null);
     this.name = node?.name ?? '';
@@ -374,6 +568,51 @@ export class DatasheetPanel {
             : this.m.datasheet.linkedUnavailable,
         ),
     });
+  }
+
+  protected finalize(node: Node): void {
+    this.api
+      .finalize(node.id, this.finalizeSubtree, this.finalizeFrom || null)
+      .subscribe((result) => {
+        this.toasts.add({
+          severity: 'success',
+          summary: this.m.history.finalizedDone(result.finalized),
+          life: 3000,
+        });
+        this.finalizing.set(false);
+        this.selection.changed();
+      });
+  }
+
+  /** The node as valid on the chosen day (rebuilt from the history). */
+  protected showState(day: string | null): void {
+    const node = this.node();
+    this.stateDay.set(day || null);
+    if (!node || !day) {
+      this.state.set(null);
+      return;
+    }
+    this.api.stateOn(node.id, day).subscribe((state) => {
+      if (this.node()?.id === node.id && this.stateDay() === day) this.state.set(state);
+    });
+  }
+
+  /** Hungarian field names of a change (technical data by their own key); duplicates (e.g. size x/y/z) once. */
+  protected fieldNames(change: ChangeView): string {
+    const names = change.fields.map((f) =>
+      f.startsWith('attrs.') && change.entity === 'node'
+        ? f.slice(6)
+        : (this.m.history.fields[f] ?? f),
+    );
+    return [...new Set(names)].join(', ');
+  }
+
+  protected day(iso: string): string {
+    return new Date(iso).toLocaleDateString('hu-HU');
+  }
+
+  protected time(iso: string): string {
+    return new Date(iso).toLocaleString('hu-HU', { dateStyle: 'short', timeStyle: 'short' });
   }
 
   protected deleteAnchor(anchor: Anchor): void {

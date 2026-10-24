@@ -166,11 +166,11 @@ public class AnchorService(AppDbContext db, CurrentUser currentUser)
 
     public async Task DeleteAsync(long id, CancellationToken ct)
     {
-        var nodeId = await db.Anchors.Where(a => a.Id == id).Select(a => (long?)a.NodeId).FirstOrDefaultAsync(ct)
+        // A tracked delete: the site check and the history of finalized nodes see it.
+        var anchor = await db.Anchors.FirstOrDefaultAsync(a => a.Id == id, ct)
             ?? throw AppException.NotFound("anchor.not_found", $"Anchor {id} not found.");
-        currentUser.RequireEditableSite(await db.Nodes.Where(n => n.Id == nodeId).Select(n => n.SiteId).FirstAsync(ct));
-        if (await db.Anchors.Where(a => a.Id == id).ExecuteDeleteAsync(ct) == 0)
-            throw AppException.NotFound("anchor.not_found", $"Anchor {id} not found.");
+        db.Anchors.Remove(anchor);
+        await db.SaveChangesAsync(ct);
     }
 
     /// <summary>Viewers do not see info points of panoramas they cannot see (not yet approved, FR-P8).</summary>

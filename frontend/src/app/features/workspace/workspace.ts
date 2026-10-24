@@ -2,13 +2,14 @@ import { Component, computed, effect, inject, input, signal, untracked } from '@
 import { Router } from '@angular/router';
 import { SelectButton } from 'primeng/selectbutton';
 import { FormsModule } from '@angular/forms';
-import { MenuItem } from 'primeng/api';
+import { ConfirmationService, MenuItem } from 'primeng/api';
 import { Avatar } from 'primeng/avatar';
 import { Button } from 'primeng/button';
 import { Menu } from 'primeng/menu';
 import { Select } from 'primeng/select';
 import { Splitter } from 'primeng/splitter';
 import { Tab, TabList, TabPanel, TabPanels, Tabs } from 'primeng/tabs';
+import { AnchorEditService } from '../../core/anchors/anchor-edit.service';
 import { AuthService } from '../../core/auth/auth.service';
 import { Mode, Permissions } from '../../core/auth/permissions';
 import { MESSAGES } from '../../core/i18n/messages';
@@ -72,16 +73,19 @@ import { UsersDialog } from '../users/users-dialog';
         [filter]="selection.sites().length > 8"
       />
       @if (can.modes().length > 1) {
-        <p-selectbutton
-          [options]="modeOptions()"
-          optionLabel="label"
-          optionValue="value"
-          [ngModel]="can.mode()"
-          (ngModelChange)="switchMode($event)"
-          [allowEmpty]="false"
-          size="small"
-          styleClass="modes"
-        />
+        <!-- Re-created after a cancelled switch, so that it shows the current mode again. -->
+        @for (key of [modeSwitcherKey()]; track key) {
+          <p-selectbutton
+            [options]="modeOptions()"
+            optionLabel="label"
+            optionValue="value"
+            [ngModel]="can.mode()"
+            (ngModelChange)="switchMode($event)"
+            [allowEmpty]="false"
+            size="small"
+            styleClass="modes"
+          />
+        }
       } @else {
         <span class="mode-label">{{ m.modes['view'] }}</span>
       }
@@ -152,6 +156,28 @@ import { UsersDialog } from '../users/users-dialog';
               <p-tab value="globe"><i class="pi pi-globe"></i> {{ m.shell.globe }}</p-tab>
             </p-tablist>
           </p-tabs>
+          @if (edits.active()) {
+            <div class="edit-session" role="status">
+              <i class="pi pi-arrows-alt"></i>
+              <span>{{ m.anchorEdit.active }}</span>
+              <b>{{ edits.count() ? m.anchorEdit.pending(edits.count()) : m.anchorEdit.none }}</b>
+              <span class="spacer"></span>
+              <p-button
+                [label]="m.anchorEdit.discard"
+                severity="secondary"
+                [text]="true"
+                size="small"
+                (onClick)="edits.stop()"
+              />
+              <p-button
+                [label]="m.anchorEdit.save"
+                icon="pi pi-check"
+                size="small"
+                [loading]="edits.saving()"
+                (onClick)="edits.save()"
+              />
+            </div>
+          }
           <div class="viewport" [class.split]="selection.panoramaId() != null">
             @if (selection.panoramaId() != null) {
               <div class="pano">
@@ -206,7 +232,10 @@ export class Workspace {
   protected readonly sitesOpen = signal(false);
   protected readonly layersOpen = signal(false);
   protected readonly usersOpen = signal(false);
+  protected readonly modeSwitcherKey = signal(0);
   protected readonly can = inject(Permissions);
+  protected readonly edits = inject(AnchorEditService);
+  private readonly confirm = inject(ConfirmationService);
   private readonly router = inject(Router);
 
   /** The mode from the route data (spec 1.5); the route guard already refused modes the user may not enter. */
@@ -239,7 +268,22 @@ export class Workspace {
   ]);
 
   protected switchMode(mode: Mode): void {
-    void this.router.navigate(['/', mode]);
+    if (this.edits.count() === 0) {
+      void this.router.navigate(['/', mode]);
+      return;
+    }
+    // Moved anchors not yet accepted: ask before the mode change drops them.
+    this.confirm.confirm({
+      header: this.m.common.confirm,
+      message: this.m.anchorEdit.confirmLeave,
+      acceptButtonProps: { label: this.m.anchorEdit.discard, severity: 'danger' },
+      rejectButtonProps: { label: this.m.common.cancel, severity: 'secondary', text: true },
+      accept: () => {
+        this.edits.discard();
+        void this.router.navigate(['/', mode]);
+      },
+      reject: () => this.modeSwitcherKey.update((k) => k + 1),
+    });
   }
 
   private readonly applyMode = effect(() => {

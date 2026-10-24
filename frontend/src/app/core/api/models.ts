@@ -107,6 +107,32 @@ export interface Node {
   sortOrder: number;
   geom: GeoJsonGeometry | null;
   attrs: Record<string, unknown> & { mapmanager_ref?: { layer: string; featureId: string } };
+  /** Finalized (null: draft): changes then need a reason and are kept in the history. */
+  finalizedAt: string | null;
+}
+
+/** A recorded change of a finalized node (or of one of its anchors). */
+export interface ChangeView {
+  id: number;
+  entity: 'node' | 'anchor';
+  entityId: number;
+  action: 'finalize' | 'create' | 'update' | 'delete';
+  /** yyyy-MM-dd: since when it is so in reality. */
+  validFrom: string;
+  recordedAt: string;
+  recordedByName: string | null;
+  reason: string | null;
+  fields: string[];
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+}
+
+/** The node as valid on a day (rebuilt from the history); tracked false: before its finalization. */
+export interface NodeState {
+  asOf: string;
+  tracked: boolean;
+  node: { name: string; code: string | null; attrs: Record<string, unknown> } | null;
+  anchors: (Record<string, unknown> & { id: number; kind: string; position: [number, number]; levelId: number | null; zRelM: number })[];
 }
 
 export interface GridRow {

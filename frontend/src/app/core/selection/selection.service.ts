@@ -91,6 +91,15 @@ export class SelectionService {
     if (id == null) this.node.set(null);
   }
 
+  /** Bumped by {@link focusNode}: views bring the selected node into view even if it was selected already. */
+  readonly focusTick = signal(0);
+
+  /** Select a node and ask every view to show it (e.g. a click on its info point). */
+  focusNode(id: number): void {
+    this.selectNode(id);
+    this.focusTick.update((v) => v + 1);
+  }
+
   /** After a change: reload the views; optionally select a node (e.g. a newly created one). */
   changed(selectId?: number | null): void {
     this.version.update((v) => v + 1);

@@ -168,6 +168,8 @@ public partial class PanoramaService(AppDbContext db, IObjectStorage storage, Pa
     {
         var panorama = await db.Panoramas.FirstOrDefaultAsync(p => p.Id == id, ct)
             ?? throw AppException.NotFound("panorama.not_found", $"Panorama {id} not found.");
+        // Its info points go with it; those of finalized records are recorded (reason) instead of cascading silently.
+        await db.RemoveFinalizedAnchorsAsync(db.Anchors.Where(a => a.PanoramaId == id), ct);
         db.Panoramas.Remove(panorama);
         await db.SaveChangesAsync(ct);
         // Objects after the row: an orphan file is cleaned up later (spec 6.2), a row without its file would be worse.

@@ -64,6 +64,12 @@ public class Node : IOrganizationOwned
     public Geometry? Geom { get; set; }
     /// <summary>Technical data, by the node type's attr_schema.</summary>
     public JsonDocument Attrs { get; set; } = JsonDocument.Parse("{}");
+    /// <summary>
+    /// Finalized (null: draft). From then on every change of its descriptive data and anchors needs a reason and is
+    /// kept in <see cref="ChangeEntry"/> with the day it is valid from.
+    /// </summary>
+    public DateTime? FinalizedAt { get; set; }
+    public long? FinalizedBy { get; set; }
 }
 
 public static class RelationKinds

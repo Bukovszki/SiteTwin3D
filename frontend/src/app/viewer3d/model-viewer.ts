@@ -394,6 +394,8 @@ export class ModelViewer {
     from: [number, number, number];
   } | null = null;
   private dragged = false;
+  /** The node just selected by a click here: the camera stays where the user is looking. */
+  private pickedHere: number | null = null;
 
   constructor() {
     afterNextRender(() => this.create());
@@ -436,6 +438,15 @@ export class ModelViewer {
       this.can.assign();
       this.xray();
       untracked(() => this.applyStyles());
+    });
+    // A node selected in another view (or focused, e.g. its info point clicked): the camera flies to its anchors.
+    effect(() => {
+      const nodeId = this.selection.nodeId();
+      this.selection.focusTick();
+      untracked(() => {
+        if (nodeId != null && nodeId !== this.pickedHere) this.flyToNode(nodeId);
+        this.pickedHere = null;
+      });
     });
     // Snap targets: the vector geometry of the selected level.
     effect(() => {
@@ -585,7 +596,9 @@ export class ModelViewer {
     scene.primitives.raiseToTop(this.volumes);
     this.applyClipping();
     this.applyStyles();
-    this.flyHome(0);
+    const selected = this.selection.nodeId();
+    if (selected != null) this.flyToNode(selected, 0);
+    else this.flyHome(0);
   }
 
   protected flyHome(duration = 1.2): void {
@@ -597,6 +610,44 @@ export class ModelViewer {
     this.viewer.camera.flyToBoundingSphere(new BoundingSphere(center, 30), {
       offset: new HeadingPitchRange(CesiumMath.toRadians(20), CesiumMath.toRadians(-50), 70),
       duration,
+    });
+  }
+
+  /**
+   * Brings a node into view: around all its anchors (boxes with their size), at their real heights. If a level is
+   * selected and the node is on another one, the level follows (the cut moves with it).
+   */
+  private flyToNode(nodeId: number, duration = 1): void {
+    const site = this.selection.site();
+    if (!this.viewer || !site || this.tilesets.size === 0) return;
+    this.api.nodeAnchors(nodeId).subscribe((anchors) => {
+      if (!this.viewer || this.selection.nodeId() !== nodeId || anchors.length === 0) return;
+      const level = this.selection.levelId();
+      if (level != null && !anchors.some((a) => a.levelId === level))
+        this.selection.levelId.set(anchors[0].levelId);
+      // The exact 3D anchors (box, model element) if there are any; info points only mark an approximate place.
+      const exact = anchors.filter((a) => a.kind === 'region' || a.kind === 'model_feature');
+      const targets = exact.length > 0 ? exact : anchors;
+      const points = targets.map((a) =>
+        Cartesian3.fromDegrees(
+          ...a.position.coordinates,
+          site.baseHeightM + this.levelElevation(a.levelId) + a.zRelM,
+        ),
+      );
+      const size = Math.max(
+        1,
+        ...targets.map((a) => Math.hypot(a.sizeX ?? 0, a.sizeY ?? 0, a.sizeZ ?? 0) / 2),
+      );
+      const sphere = BoundingSphere.fromPoints(points);
+      sphere.radius = Math.max(sphere.radius + size, 3);
+      this.viewer.camera.flyToBoundingSphere(sphere, {
+        offset: new HeadingPitchRange(
+          CesiumMath.toRadians(20),
+          CesiumMath.toRadians(-40),
+          Math.max(sphere.radius * 3, 12),
+        ),
+        duration,
+      });
     });
   }
 
@@ -1055,6 +1106,7 @@ export class ModelViewer {
       );
     if (linked) {
       this.stopEditing();
+      this.pickedHere = linked.nodeId;
       this.selection.selectNode(linked.nodeId);
       this.openInfoPointPanorama(linked.nodeId);
       return;
@@ -1080,6 +1132,7 @@ export class ModelViewer {
         });
       return;
     }
+    this.pickedHere = hit.anchor.nodeId;
     this.selection.selectNode(hit.anchor.nodeId);
     this.openInfoPointPanorama(hit.anchor.nodeId);
     if (this.can.anchors()) this.edit(hit.anchor);

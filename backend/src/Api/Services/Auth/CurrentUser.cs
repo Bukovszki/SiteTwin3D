@@ -25,6 +25,8 @@ public class CurrentUser(IHttpContextAccessor accessor)
 
     public string? Role => Principal?.FindFirstValue(ClaimTypes.Role);
 
+    public string? DisplayName => Principal?.FindFirstValue(DisplayNameClaim) ?? Principal?.FindFirstValue(ClaimTypes.Name);
+
     /// <summary>Site roles of the user (site id → Editor | Viewer); empty: no site restriction.</summary>
     public IReadOnlyDictionary<long, string> SiteRoles =>
         _siteRoles ??= Principal?.FindFirstValue(SiteRolesTransformation.Claim) is { } json

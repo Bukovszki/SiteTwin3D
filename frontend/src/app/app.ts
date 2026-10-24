@@ -5,17 +5,19 @@ import { ConfirmDialog } from 'primeng/confirmdialog';
 import { Toast } from 'primeng/toast';
 import { silent } from './core/api/errors';
 import { AuthService } from './core/auth/auth.service';
+import { ChangeReasonDialog } from './core/history/change-reason-dialog';
 import { MESSAGES } from './core/i18n/messages';
 import { LoginScreen } from './features/auth/login-screen';
 import { PlatformScreen } from './features/platform/platform-screen';
 
 /** App frame: session check, then the sign-in screen or the work area (routes; the modes of spec 1.5 come in M5). */
 @Component({
-  imports: [RouterOutlet, Toast, ConfirmDialog, LoginScreen, PlatformScreen],
+  imports: [RouterOutlet, Toast, ConfirmDialog, LoginScreen, PlatformScreen, ChangeReasonDialog],
   selector: 'app-root',
   template: `
     <p-toast position="bottom-right" />
     <p-confirmdialog [style]="{ width: '28rem' }" />
+    <app-change-reason-dialog />
     @if (!auth.checked()) {
       <!-- Nothing during the startup session check. -->
     } @else if (!auth.ready()) {
