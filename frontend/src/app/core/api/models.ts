@@ -269,6 +269,9 @@ export interface Anchor {
   sizeY: number | null;
   sizeZ: number | null;
   headingDeg: number | null;
+  /** Model element (kind model_feature): the model and the element's STABLE id (never a per-tile feature index). */
+  modelAssetId: number | null;
+  featureRef: string | null;
 }
 
 /** Placement of a GLB without georeference: origin at the point, heightM above the site base, forward (glTF −Z) to headingDeg. */
@@ -290,6 +293,52 @@ export interface ModelAsset {
   elementIdProperty: string | null;
   /** tileset.json through the API: its tile contents are short-lived signed object store URLs. */
   tilesetUrl: string;
+}
+
+/** Where a node is: explicit located_in relation, or derived from the smallest location box containing its anchor. */
+export interface LocationRef {
+  nodeId: number;
+  name: string;
+  /** Breadcrumb of the place (building › level › room). */
+  path: string[];
+  source: 'relation' | 'box';
+}
+
+export interface MemberLocation {
+  nodeId: number;
+  name: string;
+  code: string | null;
+  typeCode: string;
+  parentId: number | null;
+  depth: number;
+  location: LocationRef | null;
+  levelId: number | null;
+  levelName: string | null;
+}
+
+/** A node and its whole subtree (e.g. the elements of a process line) with their places. */
+export interface NodeMembers {
+  node: MemberLocation;
+  members: MemberLocation[];
+}
+
+/** Import check of the element ids of a segmented model. */
+export interface ElementCheck {
+  property: string;
+  contentsChecked: number;
+  contentsWithoutProperty: number;
+  elements: number;
+  distinctIds: number;
+  missing: number;
+  duplicates: string[];
+  truncated: boolean;
+}
+
+/** Vector geometry of a level (WGS84): snap targets. partial: MapManager was not reachable. */
+export interface FloorGeometry {
+  type: 'FeatureCollection';
+  features: { type: 'Feature'; geometry: GeoJsonGeometry; properties: { source: 'draw' | 'floorplan'; layer: string } }[];
+  partial: boolean;
 }
 
 export interface ModelUploadTicket {

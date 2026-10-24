@@ -7,6 +7,7 @@ using Api.Services.Maps;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Options;
+using NetTopologySuite.Geometries;
 
 namespace Api.Endpoints.Maps;
 
@@ -42,6 +43,8 @@ public static class MapEndpoints
         api.MapGet("/maps/wms", Wms).WithTags("Maps").RequireAuthorization(Policies.Member)
             .WithSummary("WMS proxy (mapLayerId=… or floorplanId=…): GetMap, GetFeatureInfo, GetLegendGraphic of a configured layer only");
 
+        api.MapGet("/sites/{siteId:long}/floors/{levelId:long}/geometry", FloorGeometry).WithTags("Floorplans").RequireAuthorization(Policies.Member)
+            .WithSummary("Vector geometry of a level (own drawing layers + MapManager floorplan features, WGS84 GeoJSON): snap targets; partial=true if MapManager is unreachable");
         api.MapGet("/sites/{siteId:long}/levels", Levels).WithTags("Floorplans").RequireAuthorization(Policies.Member)
             .WithSummary("Levels of the site by elevation, with floorplan and panorama counts (level selector)");
         var floorplans = api.MapGroup("/levels/{levelId:long}/floorplans").WithTags("Floorplans");
@@ -108,6 +111,13 @@ public static class MapEndpoints
         return await proxy.ForwardAsync(context, new WmsProxy.WmsTarget(layer.Source, layer.Layer, layer.ExternalUrl, layer.WmsParams, null), ct);
     }
 
+    private static async Task<Ok<FloorGeometryDto>> FloorGeometry(long siteId, long levelId, FloorGeometryService geometry, CancellationToken ct)
+    {
+        var result = await geometry.GetAsync(siteId, levelId, ct);
+        return TypedResults.Ok(new FloorGeometryDto(
+            result.Elements.Select(e => new FloorFeatureDto(e.Geometry, new FloorFeatureProperties(e.Source, e.Layer))).ToList(), result.Partial));
+    }
+
     private static async Task<Ok<List<LevelInfo>>> Levels(long siteId, FloorplanService floorplans, CancellationToken ct) =>
         TypedResults.Ok(await floorplans.LevelsAsync(siteId, ct));
 
@@ -153,4 +163,17 @@ public static class MapEndpoints
 
     private static async Task<Results<Ok<JsonElement>, NoContent>> LinkedAttributes(long id, LinkService links, CancellationToken ct) =>
         await links.LinkedAttributesAsync(id, ct) is { } attributes ? TypedResults.Ok(attributes) : TypedResults.NoContent();
+}
+
+public record FloorFeatureProperties(string Source, string Layer);
+
+public record FloorFeatureDto(Geometry Geometry, FloorFeatureProperties Properties)
+{
+    public string Type => "Feature";
+}
+
+/// <summary>GeoJSON FeatureCollection (WGS84) with a <see cref="Partial"/> flag.</summary>
+public record FloorGeometryDto(List<FloorFeatureDto> Features, bool Partial)
+{
+    public string Type => "FeatureCollection";
 }

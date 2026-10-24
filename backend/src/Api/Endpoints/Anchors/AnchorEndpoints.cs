@@ -15,12 +15,12 @@ namespace Api.Endpoints.Anchors;
 /// </summary>
 public record AnchorDto(long Id, long NodeId, string NodeName, string? NodeCode, string TypeCode, string Kind, long? PanoramaId, float? YawDeg,
     float? PitchDeg, Point Position, long? LevelId, float ZRelM, string? PositionSource, string? RegionShape, float? SizeX, float? SizeY,
-    float? SizeZ, float? HeadingDeg)
+    float? SizeZ, float? HeadingDeg, long? ModelAssetId, string? FeatureRef)
 {
     public static AnchorDto From(AnchorView v) => new(v.Anchor.Id, v.Anchor.NodeId, v.NodeName, v.NodeCode, v.TypeCode, v.Anchor.Kind,
         v.Anchor.PanoramaId, v.Anchor.YawDeg, v.Anchor.PitchDeg, v.Anchor.Position, v.Anchor.LevelId, v.Anchor.ZRelM,
         v.Anchor.Attrs.RootElement.TryGetProperty("position_source", out var s) ? s.GetString() : null,
-        v.Anchor.RegionShape, v.Anchor.SizeX, v.Anchor.SizeY, v.Anchor.SizeZ, v.Anchor.HeadingDeg);
+        v.Anchor.RegionShape, v.Anchor.SizeX, v.Anchor.SizeY, v.Anchor.SizeZ, v.Anchor.HeadingDeg, v.Anchor.ModelAssetId, v.Anchor.FeatureRef);
 }
 
 public record LinkRequest(long ToId);
@@ -32,7 +32,7 @@ public static class AnchorEndpoints
     {
         api.MapGet("/nodes/{id:long}/anchors", OfNode).WithTags("Anchors").RequireAuthorization(Policies.Member).WithSummary("Anchors of a node");
         api.MapPost("/nodes/{id:long}/anchors", Create).WithTags("Anchors").RequireAuthorization(Policies.Editor)
-            .WithSummary("New anchor: point; info point (panorama_point: panoramaId, yawDeg, pitchDeg in image angles) with its approximate place on the floorplan; box (region: sizeX/Y/Z m, headingDeg, centre = position + zRelM)");
+            .WithSummary("New anchor: point; info point (panorama_point: panoramaId, yawDeg, pitchDeg in image angles) with its approximate place on the floorplan; box (region: sizeX/Y/Z m, headingDeg, centre = position + zRelM); model element (model_feature: modelAssetId, featureRef = stable element id)");
         api.MapGet("/panoramas/{id:long}/anchors", OfPanorama).WithTags("Anchors").RequireAuthorization(Policies.Member)
             .WithSummary("Info points of a panorama");
         api.MapGet("/sites/{siteId:long}/anchors", OfLevel).WithTags("Anchors").RequireAuthorization(Policies.Member)

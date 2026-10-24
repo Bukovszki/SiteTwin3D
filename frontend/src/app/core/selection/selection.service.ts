@@ -1,6 +1,6 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
+import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import { ApiService } from '../api/api.service';
-import { Node, NodeType, Site } from '../api/models';
+import { Node, NodeMembers, NodeType, Site } from '../api/models';
 
 /**
  * The central selection (spec 1.5, 11): current site, aspect, selected node. Every view (tree, grid, map, data
@@ -27,10 +27,38 @@ export class SelectionService {
 
   /** The open panorama, and where its camera looks (absolute heading from north, horizontal FOV) – for the view cone. */
   readonly panoramaId = signal<number | null>(null);
-  readonly panoramaView = signal<{ position: [number, number]; headingDeg: number; fovDeg: number } | null>(null);
+  readonly panoramaView = signal<{
+    position: [number, number];
+    headingDeg: number;
+    fovDeg: number;
+  } | null>(null);
 
   /** Bumped after edits (create, update, move, delete, import): views reload their data. */
   readonly version = signal(0);
+
+  /** The selected node's subtree with places (e.g. every element of a process line, M8). */
+  readonly members = signal<NodeMembers | null>(null);
+  /** The selected node and its whole subtree: highlighted together in the views (FR-3D5). */
+  readonly highlightIds = computed(() => {
+    const ids = new Set<number>(this.members()?.members.map((m) => m.nodeId) ?? []);
+    const id = this.nodeId();
+    if (id != null) ids.add(id);
+    return ids;
+  });
+
+  constructor() {
+    effect(() => {
+      const id = this.nodeId();
+      this.version();
+      untracked(() => {
+        if (this.members()?.node.nodeId !== id) this.members.set(null);
+        if (id != null)
+          this.api.members(id).subscribe((members) => {
+            if (this.nodeId() === id) this.members.set(members);
+          });
+      });
+    });
+  }
 
   loadSites(selectId?: number): void {
     this.api.sites().subscribe((sites) => {

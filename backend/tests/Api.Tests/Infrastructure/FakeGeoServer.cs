@@ -29,6 +29,9 @@ public sealed class FakeGeoServer : HttpMessageHandler
         [$"{TypeName}.3"] = new JsonObject { ["nev"] = "P3 szivattyú", ["gyarto"] = "Grundfos", ["teljesitmeny"] = 4.0 },
     };
 
+    /// <summary>Layers with geometry (e.g. a floorplan): GeoJSON geometries as the test gives them (EPSG:3857).</summary>
+    public Dictionary<string, List<JsonObject>> GeometryLayers { get; } = [];
+
     public IEnumerable<Dictionary<string, string>> Queries =>
         Requests.Select(r => QueryHelpers.ParseQuery(r.RequestUri!.Query).ToDictionary(p => p.Key.ToUpperInvariant(), p => p.Value.ToString()));
 
@@ -41,6 +44,16 @@ public sealed class FakeGeoServer : HttpMessageHandler
 
         if (request.RequestUri.AbsolutePath.EndsWith("/wms") || query.GetValueOrDefault("SERVICE") == "WMS")
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Png) { Headers = { { "Content-Type", "image/png" } } } });
+
+        if (GeometryLayers.TryGetValue(query.GetValueOrDefault("TYPENAMES", ""), out var geometries))
+            return Json(new JsonObject
+            {
+                ["type"] = "FeatureCollection",
+                ["features"] = new JsonArray(geometries.Select((g, i) => (JsonNode)new JsonObject
+                {
+                    ["type"] = "Feature", ["id"] = $"f.{i + 1}", ["geometry"] = g.DeepClone(), ["properties"] = new JsonObject(),
+                }).ToArray()),
+            });
 
         if (query.GetValueOrDefault("TYPENAMES") != Layer)
             return Json(new JsonObject { ["featureTypes"] = new JsonArray(), ["features"] = new JsonArray() });

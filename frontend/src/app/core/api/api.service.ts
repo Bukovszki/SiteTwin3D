@@ -5,6 +5,8 @@ import {
   Anchor,
   DrawLayer,
   DrawTransaction,
+  ElementCheck,
+  FloorGeometry,
   Floorplan,
   GridFilter,
   GridPage,
@@ -18,6 +20,7 @@ import {
   ModelAsset,
   ModelUploadTicket,
   Node,
+  NodeMembers,
   NodeType,
   Panorama,
   PanoramaNeighbour,
@@ -94,6 +97,14 @@ export class ApiService {
   /** Partial update; `parentId: null` moves the node to the root. */
   updateNode(id: number, patch: Record<string, unknown>, context?: HttpContext): Observable<Node> {
     return this.http.patch<Node>(`${API}/nodes/${id}`, patch, { context });
+  }
+  /** The node and its subtree with the place of each element (M8). */
+  members(id: number): Observable<NodeMembers> {
+    return this.http.get<NodeMembers>(`${API}/nodes/${id}/members`);
+  }
+  /** Explicit place (located_in); null clears it. */
+  setLocation(id: number, locationId: number | null): Observable<void> {
+    return this.http.put<void>(`${API}/nodes/${id}/location`, { locationId });
   }
   deleteNode(id: number, recursive: boolean): Observable<void> {
     return this.http.delete<void>(`${API}/nodes/${id}`, { params: { recursive } });
@@ -177,10 +188,6 @@ export class ApiService {
   levelAnchors(siteId: number, levelId: number | null): Observable<Anchor[]> {
     return this.http.get<Anchor[]>(`${API}/sites/${siteId}/anchors`, { params: levelId == null ? {} : { levelId } });
   }
-  /** Every box (region anchor) of a site, for the 3D view. */
-  regionAnchors(siteId: number): Observable<Anchor[]> {
-    return this.http.get<Anchor[]>(`${API}/sites/${siteId}/anchors`, { params: { allLevels: true, kind: 'region' } });
-  }
   panoramaAnchors(panoramaId: number): Observable<Anchor[]> {
     return this.http.get<Anchor[]>(`${API}/panoramas/${panoramaId}/anchors`);
   }
@@ -209,6 +216,17 @@ export class ApiService {
   }
   updateModel(id: number, patch: Record<string, unknown>): Observable<ModelAsset> {
     return this.http.patch<ModelAsset>(`${API}/models/${id}`, patch);
+  }
+  elementCheck(id: number): Observable<ElementCheck> {
+    return this.http.post<ElementCheck>(`${API}/models/${id}/element-check`, {});
+  }
+  /** Vector geometry of a level (own drawing layers + MapManager floorplan): snap targets. */
+  floorGeometry(siteId: number, levelId: number): Observable<FloorGeometry> {
+    return this.http.get<FloorGeometry>(`${API}/sites/${siteId}/floors/${levelId}/geometry`);
+  }
+  /** Every anchor of a kind on the site (e.g. model elements for the 3D view). */
+  siteAnchors(siteId: number, kind: Anchor['kind']): Observable<Anchor[]> {
+    return this.http.get<Anchor[]>(`${API}/sites/${siteId}/anchors`, { params: { allLevels: true, kind } });
   }
   deleteModel(id: number): Observable<void> {
     return this.http.delete<void>(`${API}/models/${id}`);

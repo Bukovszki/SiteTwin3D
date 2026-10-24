@@ -32,7 +32,9 @@ docs/        ← SPECIFICATION.md, MAPMANAGER_EXTENSIONS.md, kézikönyvek
 - A `node_type.attr_schema` `json` (nem `jsonb`), mert a mezők sorrendje az űrlap és a grid oszlopsorrendje.
 - Objektumtár: a böngésző aláírt URL-lel, **azonos originen** éri el: a Caddy a `/objects/*` útvonalat (= a vödör neve) változatlan Host fejléccel adja tovább, így az S3-aláírás érvényes és CORS sem kell. A `/media/` foglalt (Angular betűtípusok). A `Storage:PublicUrl` = a felhasználók által megnyitott cím.
 - Panorámák (FR-P8): feldolgozási sor = a `panorama.privacy_status` (pending → review → rendering → approved | failed), háttérfeladat: `PanoramaWorker`. Arcfelismerés helyben: UltraFace RFB-640 ONNX (`backend/models/`, MIT), SkiaSharp (MIT) – ImageSharpot ne használj (licenc). A régiók képi szögekben (yaw 0 = képközép) vannak, a tájolástól függetlenül. A rendszámkeresés még nincs kész.
-- Horgonyok (FR-A): az 1. fázisban `point` és `panorama_point` (infopont: képi yaw/pitch + közelítő hely az alaprajzon; alaprajz nélkül a panoráma helye, `attrs.position_source = panorama_fallback`). M6 óta `region`/`box` is (doboz: középpont = `position` + `z_rel_m`, méretek méterben, tájolás északtól; a 3D-ben osztályozó térfogattal kiemelve, kattintáskor a legkisebb tartalmazó doboz nyer). A sokszöghasáb és a `model_feature` később (M7).
+- Horgonyok (FR-A): az 1. fázisban `point` és `panorama_point` (infopont: képi yaw/pitch + közelítő hely az alaprajzon; alaprajz nélkül a panoráma helye, `attrs.position_source = panorama_fallback`). M6 óta `region`/`box` is (doboz: középpont = `position` + `z_rel_m`, méretek méterben, tájolás északtól; a 3D-ben osztályozó térfogattal kiemelve, kattintáskor a legkisebb tartalmazó doboz nyer). M7 óta `model_feature` is (a stabil `element_id`, a modell `attrs.element_id_property` tulajdonsága szerint; egy elem egy rekordé). A sokszöghasáb még nincs kész.
+- Funkcionális nézőpont (M8): a csomópont helye `located_in` (egy, explicit) vagy a legkisebb tartalmazó helyszíni doboz (`Services/Locations`); a kijelölt csomópont részfáját a `SelectionService.members`/`highlightIds` tölti be egy helyen, ezt használja a 3D-nézet és az adatlap.
+- Illesztés 3D-ben: `core/geo/snap.ts` (helyi sík valós méterben, csúcs > él), forrás: `GET /sites/{id}/floors/{levelId}/geometry` (rajzi rétegek + MapManager WFS). A Cesiumban a modellelem kiválasztásához `drillPick` kell (a dobozok osztályozó térfogata eltakarja), és a `pickPosition`-t előtte kell hívni.
 - Bejárás: a szomszédság kézi kapcsolat (`panorama_link`, mindkét irányban); az automatikus összekötés csak javaslat (legközelebbiek `geography`-távolsággal), utána kézzel javítható.
 - Rajzi rétegek: szerkesztés EPSG:3857-ben, tárolás WGS84-ben (`Services/Drawing/WebMercator.cs`, pontos képlet); egy rekordhoz itt egy geometria tartozik.
 - Cesium-panoráma tájolása: `IMAGE_HEADING_OFFSET = -90` (mérés: `frontend/src/app/features/panorama/README.md`; Cesium-frissítés után ellenőrizni).
@@ -110,6 +112,8 @@ cd deploy && docker-compose -f docker-compose.yml -f docker-compose.local.yml -f
 
 # M6 mintamodell: a minta-alaprajz épülete GLB-ként (feltöltés: Előkészítés → 3D → feltöltés ikon; elhelyezés: a telephely pontja, 0 m, 0°)
 node deploy/dev/sample-model.mjs sample-building.glb
+# M7: szegmentált változat (EXT_mesh_features + EXT_structural_metadata, elemazonosító tulajdonság: element_id)
+node deploy/dev/sample-model.mjs --segmented
 
 # Frontend (http://localhost:4200; /api és /health → localhost:5032, proxy.conf.mjs)
 # A futó compose stack API-jához: API_URL=https://localhost:8543 npm start

@@ -22,7 +22,8 @@ public static class PositionSources
 /// metres, heading clockwise from north (spec 8.2).
 /// </summary>
 public record AnchorCreate(string Kind, Point Position, long? LevelId, float? ZRelM, long? PanoramaId, float? YawDeg, float? PitchDeg,
-    string? PositionSource, string? RegionShape = null, float? SizeX = null, float? SizeY = null, float? SizeZ = null, float? HeadingDeg = null);
+    string? PositionSource, string? RegionShape = null, float? SizeX = null, float? SizeY = null, float? SizeZ = null, float? HeadingDeg = null,
+    long? ModelAssetId = null, string? FeatureRef = null);
 
 /// <summary>Partial update; null = not sent (<see cref="LevelIdSet"/> distinguishes "outdoor").</summary>
 public record AnchorUpdate(Point? Position = null, long? LevelId = null, bool LevelIdSet = false, float? ZRelM = null, float? YawDeg = null,
@@ -34,8 +35,9 @@ public record AnchorView(Anchor Anchor, string NodeName, string? NodeCode, strin
 /// <summary>
 /// Anchors: the spatial appearances of a node (spec 8.2, FR-A). The anchor always belongs to the node; display-side ids
 /// (panorama, yaw / pitch) live only in the anchor. Every anchor has a WGS84 position, level and height above the
-/// floor, so the node shows on the floorplan even without own geometry (FR-A4). Point, info point (panorama_point)
-/// and box (region / box, spec 9.1); the prism shape and model_feature come later (M7).
+/// floor, so the node shows on the floorplan even without own geometry (FR-A4). Point, info point (panorama_point),
+/// box (region / box, spec 9.1) and model element (model_feature: the STABLE element id of a segmented model, never
+/// the per-tile feature index); the prism shape comes later.
 /// </summary>
 public class AnchorService(AppDbContext db, CurrentUser currentUser)
 {
@@ -71,9 +73,9 @@ public class AnchorService(AppDbContext db, CurrentUser currentUser)
     {
         var node = await db.Nodes.AsNoTracking().FirstOrDefaultAsync(n => n.Id == nodeId, ct)
             ?? throw AppException.NotFound("node.not_found", $"Node {nodeId} not found.");
-        if (request.Kind is not (AnchorKinds.Point or AnchorKinds.PanoramaPoint or AnchorKinds.Region)
+        if (request.Kind is not (AnchorKinds.Point or AnchorKinds.PanoramaPoint or AnchorKinds.Region or AnchorKinds.ModelFeature)
             || (request.Kind == AnchorKinds.Region && (request.RegionShape ?? RegionShapes.Box) != RegionShapes.Box))
-            throw AppException.BadRequest("anchor.kind_not_supported", "Supported: point, panorama_point and region (box); prisms and model elements come later.");
+            throw AppException.BadRequest("anchor.kind_not_supported", "Supported: point, panorama_point, region (box) and model_feature; prisms come later.");
         if (request.LevelId is { } levelId) await RequireLevelAsync(levelId, node.SiteId, ct);
 
         var anchor = new Anchor
@@ -106,6 +108,22 @@ public class AnchorService(AppDbContext db, CurrentUser currentUser)
             anchor.SizeY = ValidSize(y);
             anchor.SizeZ = ValidSize(z);
             anchor.HeadingDeg = Normalize(request.HeadingDeg ?? 0);
+        }
+        if (request.Kind == AnchorKinds.ModelFeature)
+        {
+            var featureRef = request.FeatureRef?.Trim();
+            if (request.ModelAssetId is not { } modelId || string.IsNullOrEmpty(featureRef) || featureRef.Length > 200)
+                throw AppException.BadRequest("anchor.feature_fields", "A model element needs modelAssetId and featureRef (its stable element id).");
+            var model = await db.ModelAssets.AsNoTracking().FirstOrDefaultAsync(m => m.Id == modelId, ct)
+                ?? throw AppException.NotFound("model.not_found", $"Model {modelId} not found.");
+            if (model.SiteId != node.SiteId) throw AppException.BadRequest("anchor.other_site", "The model is on another site.");
+            if (!model.Segmented) throw AppException.BadRequest("model.not_segmented", "The model has no element id property.");
+            // One element is one object: it belongs to a single record.
+            var owner = await db.Anchors.Where(a => a.ModelAssetId == modelId && a.FeatureRef == featureRef).Select(a => (long?)a.NodeId).FirstOrDefaultAsync(ct);
+            if (owner is not null)
+                throw AppException.Conflict("anchor.feature_taken", owner == nodeId ? "The element is already linked to this record." : "The element belongs to another record.");
+            anchor.ModelAssetId = modelId;
+            anchor.FeatureRef = featureRef;
         }
         db.Anchors.Add(anchor);
         await db.SaveChangesAsync(ct);

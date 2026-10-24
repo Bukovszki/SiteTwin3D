@@ -67,7 +67,12 @@ interface PendingFile {
         <ng-template #body let-x>
           <tr [pSelectableRow]="x">
             <td>{{ x.name }}</td>
-            <td>{{ m.models.kinds[x.kind] }}</td>
+            <td>
+              {{ m.models.kinds[x.kind] }}
+              @if (x.segmented) {
+                · {{ m.models.segmented }}
+              }
+            </td>
             <td>
               @if (x.placement; as p) {
                 {{ p.lon.toFixed(6) }}, {{ p.lat.toFixed(6) }} · {{ p.heightM }} m ·
@@ -123,7 +128,17 @@ interface PendingFile {
             ><input pInputText id="model-name" [(ngModel)]="name" />
           </div>
         }
-        @if (source === 'glb' || edited()?.kind === 'gltf') {
+        <div class="field">
+          <label for="model-element-id">{{ m.models.elementIdProperty }}</label>
+          <input
+            pInputText
+            id="model-element-id"
+            [(ngModel)]="elementIdProperty"
+            placeholder="element_id"
+          />
+          <small class="muted">{{ m.models.elementIdHint }}</small>
+        </div>
+        @if (edited() ? edited()?.kind === 'gltf' : source === 'glb') {
           <label>{{ m.models.placement }}</label>
           <div class="row">
             <div class="field">
@@ -169,13 +184,24 @@ interface PendingFile {
         @if (error()) {
           <p-message severity="error" size="small">{{ error() }}</p-message>
         }
+        @if (checkResult(); as text) {
+          <p-message severity="info" size="small">{{ text }}</p-message>
+        }
         <small class="muted">{{ m.models.processing }}</small>
         <div class="actions">
           @if (edited(); as x) {
             <p-button [label]="m.models.upload" [text]="true" (onClick)="edit(null)" />
-            @if (x.kind === 'gltf') {
-              <p-button [label]="m.common.save" icon="pi pi-save" (onClick)="savePlacement(x)" />
+            @if (x.segmented) {
+              <p-button
+                [label]="m.models.check"
+                icon="pi pi-check-square"
+                severity="secondary"
+                [outlined]="true"
+                [loading]="busy()"
+                (onClick)="check(x)"
+              />
             }
+            <p-button [label]="m.common.save" icon="pi pi-save" (onClick)="save(x)" />
           } @else {
             <span class="muted">{{ progress() }}</span>
             <p-button
@@ -233,12 +259,14 @@ export class ModelsDialog {
   protected readonly busy = signal(false);
   protected readonly progress = signal('');
   protected readonly error = signal<string | null>(null);
+  protected readonly checkResult = signal<string | null>(null);
   protected readonly sources = [
     { value: 'glb', label: this.m.models.glb },
     { value: 'tiles', label: this.m.models.tiles },
   ];
   protected source: 'glb' | 'tiles' = 'glb';
   protected name = '';
+  protected elementIdProperty = '';
   protected placement: ModelPlacement = { lon: 0, lat: 0, heightM: 0, headingDeg: 0 };
 
   private readonly loadOnOpen = effect(() => {
@@ -257,8 +285,10 @@ export class ModelsDialog {
   protected edit(model: ModelAsset | null): void {
     this.edited.set(model);
     this.error.set(null);
+    this.checkResult.set(null);
     this.files.set([]);
     this.name = '';
+    this.elementIdProperty = model?.elementIdProperty ?? '';
     const [lon, lat] = this.selection.site()?.refPoint.coordinates ?? [0, 0];
     this.placement = { ...(model?.placement ?? { lon, lat, heightM: 0, headingDeg: 0 }) };
   }
@@ -323,6 +353,7 @@ export class ModelsDialog {
             prefix: ticket.prefix,
             name: this.name.trim(),
             placement: this.source === 'glb' ? this.placement : null,
+            elementIdProperty: this.elementIdProperty.trim() || null,
           },
           silent(),
         ),
@@ -338,12 +369,28 @@ export class ModelsDialog {
     }
   }
 
-  protected savePlacement(model: ModelAsset): void {
-    this.api.updateModel(model.id, { placement: this.placement }).subscribe((saved) => {
+  protected save(model: ModelAsset): void {
+    const patch: Record<string, unknown> = {
+      elementIdProperty: this.elementIdProperty.trim() || null,
+    };
+    if (model.kind === 'gltf') patch['placement'] = this.placement;
+    this.api.updateModel(model.id, patch).subscribe((saved) => {
       this.toasts.add({ severity: 'success', summary: this.m.models.saved, life: 2500 });
       this.load();
       this.edited.set(saved);
       this.changed.emit();
+    });
+  }
+
+  /** Import check of the element ids (spec 9.1): missing and duplicated ids. */
+  protected check(model: ModelAsset): void {
+    this.busy.set(true);
+    this.api.elementCheck(model.id).subscribe({
+      next: (result) => {
+        this.busy.set(false);
+        this.checkResult.set(this.m.models.checkResult(result));
+      },
+      error: () => this.busy.set(false),
     });
   }
 

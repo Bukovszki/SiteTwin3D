@@ -3,6 +3,7 @@ using Api.Model;
 using Api.Services;
 using Api.Services.Auth;
 using Api.Services.Hierarchy;
+using Api.Services.Locations;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Options;
@@ -22,6 +23,8 @@ public record NodeDto(long Id, long SiteId, long? ParentId, string Path, int Dep
 public record GridRowDto(NodeDto Node, List<string> AnchorKinds, bool Linked);
 
 public record GridPageDto(int Total, List<GridRowDto> Rows);
+
+public record LocationRequest(long? LocationId);
 
 public record RelationDto(long FromId, long ToId, string Kind)
 {
@@ -59,6 +62,10 @@ public static class NodeEndpoints
             .WithSummary("New relation from this node (kind e.g. located_in, connected_to, feeds)");
         group.MapDelete("/{id:long}/relations", DeleteRelation).RequireAuthorization(Policies.Editor)
             .WithSummary("Delete the relation from this node to toId of the given kind");
+        group.MapGet("/{id:long}/members", Members).RequireAuthorization(Policies.Member)
+            .WithSummary("The node and its whole subtree (e.g. a process line) with where each element is: located_in relation, else the smallest location box containing its anchor");
+        group.MapPut("/{id:long}/location", SetLocation).RequireAuthorization(Policies.Editor)
+            .WithSummary("Sets the explicit place of the node (its single located_in relation); locationId null clears it");
         return api;
     }
 
@@ -133,6 +140,15 @@ public static class NodeEndpoints
     {
         var relation = await nodes.AddRelationAsync(id, request, ct);
         return TypedResults.Created($"/api/v1/nodes/{id}/relations", RelationDto.From(relation));
+    }
+
+    private static async Task<Ok<NodeMembers>> Members(long id, LocationService locations, CancellationToken ct) =>
+        TypedResults.Ok(await locations.MembersAsync(id, ct));
+
+    private static async Task<NoContent> SetLocation(long id, LocationRequest request, LocationService locations, CancellationToken ct)
+    {
+        await locations.SetLocationAsync(id, request.LocationId, ct);
+        return TypedResults.NoContent();
     }
 
     private static async Task<NoContent> DeleteRelation(long id, long toId, string kind, NodeService nodes, CancellationToken ct)

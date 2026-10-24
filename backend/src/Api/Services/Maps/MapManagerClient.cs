@@ -6,6 +6,8 @@ using Api.Services.Auth;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
+using NetTopologySuite.Geometries;
+using NetTopologySuite.IO.Converters;
 
 namespace Api.Services.Maps;
 
@@ -101,6 +103,29 @@ public class MapManagerClient(
             new("SERVICE", "WFS"), new("VERSION", "2.0.0"), new("REQUEST", "GetFeature"), new("TYPENAMES", layer),
             new("OUTPUTFORMAT", "application/json"), new("FEATUREID", string.Join(',', featureIds))], ct);
         return ParsePage(json.RootElement).Features;
+    }
+
+    /// <summary>
+    /// Geometries of a layer (e.g. the walls and rooms of a floorplan) in WGS84. Asked for in EPSG:3857 – the GeoJSON
+    /// axis order is then unambiguous – and converted with the exact formula; never used for metric values here.
+    /// </summary>
+    public async Task<List<Geometry>> GeometriesAsync(string layer, string? cql, int maxCount, CancellationToken ct)
+    {
+        var connection = await ConnectionAsync(ct);
+        var query = new List<KeyValuePair<string, string>>
+        {
+            new("SERVICE", "WFS"), new("VERSION", "2.0.0"), new("REQUEST", "GetFeature"), new("TYPENAMES", layer),
+            new("OUTPUTFORMAT", "application/json"), new("SRSNAME", "EPSG:3857"), new("COUNT", maxCount.ToString()),
+        };
+        if (!string.IsNullOrEmpty(cql)) query.Add(new("CQL_FILTER", cql));
+        using var json = await GetJsonAsync(connection, query, ct);
+        var reader = new JsonSerializerOptions { Converters = { new GeoJsonConverterFactory(new GeometryFactory(new PrecisionModel(), 3857)) } };
+        return json.RootElement.GetProperty("features").EnumerateArray()
+            .Where(f => f.TryGetProperty("geometry", out var g) && g.ValueKind == JsonValueKind.Object)
+            .Select(f => f.GetProperty("geometry").Deserialize<Geometry>(reader))
+            .OfType<Geometry>()
+            .Select(Drawing.WebMercator.ToWgs84)
+            .ToList();
     }
 
     private async Task<JsonDocument> GetJsonAsync(Connection connection, IEnumerable<KeyValuePair<string, string>> query, CancellationToken ct)

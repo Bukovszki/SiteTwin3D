@@ -27,8 +27,16 @@ public record ModelPlacement(double Lon, double Lat, double HeightM, double Head
 
 public record ModelCreate(string Prefix, string Name, long? NodeId, ModelPlacement? Placement, string? ElementIdProperty);
 
-/// <summary>Partial update; null = not sent (<see cref="NodeIdSet"/> distinguishes unlinking from the node).</summary>
-public record ModelUpdate(string? Name = null, long? NodeId = null, bool NodeIdSet = false, ModelPlacement? Placement = null);
+/// <summary>Partial update; null = not sent (the *Set flags distinguish clearing a value).</summary>
+public record ModelUpdate(string? Name = null, long? NodeId = null, bool NodeIdSet = false, ModelPlacement? Placement = null,
+    string? ElementIdProperty = null, bool ElementIdPropertySet = false);
+
+/// <summary>
+/// Import check of the stable element ids (spec 9.1): how many elements were read, how many have no id, and ids that
+/// occur twice in one property table. The same id in several tiles (levels of detail) is expected and not reported.
+/// </summary>
+public record ElementCheck(string Property, int ContentsChecked, int ContentsWithoutProperty, int Elements, int DistinctIds, int Missing,
+    List<string> Duplicates, bool Truncated);
 
 /// <summary>
 /// 3D models of a site (spec 4.8, 9, FR-I1): a single GLB or a ready 3D Tiles package, uploaded file by file with
@@ -43,6 +51,8 @@ public partial class ModelService(AppDbContext db, IObjectStorage storage, Curre
     public const string TilesetFile = "tileset.json";
     private const int MaxFiles = 20000;
     private const long MaxTilesetBytes = 64L * 1024 * 1024;
+    private const int MaxCheckedContents = 500;
+    private const long MaxCheckedBytes = 512L * 1024 * 1024;
 
     [GeneratedRegex(@"^org/\d+/models/[0-9a-f]{32}/")]
     private static partial Regex PrefixRegex();
@@ -104,7 +114,11 @@ public partial class ModelService(AppDbContext db, IObjectStorage storage, Curre
         }
         else throw AppException.BadRequest("model.upload_missing", "The files have not been uploaded (or the upload expired).");
 
-        if (!string.IsNullOrWhiteSpace(request.ElementIdProperty)) attrs["element_id_property"] = request.ElementIdProperty.Trim();
+        if (!string.IsNullOrWhiteSpace(request.ElementIdProperty))
+        {
+            attrs["element_id_property"] = request.ElementIdProperty.Trim();
+            asset.Segmented = true;
+        }
         asset.Attrs = JsonSerializer.SerializeToDocument(attrs);
         db.ModelAssets.Add(asset);
         await db.SaveChangesAsync(ct);
@@ -140,6 +154,14 @@ public partial class ModelService(AppDbContext db, IObjectStorage storage, Curre
         {
             if (request.NodeId is { } nodeId) await RequireNodeAsync(nodeId, asset.SiteId, ct);
             asset.NodeId = request.NodeId;
+        }
+        if (request.ElementIdPropertySet)
+        {
+            // Segmented = its elements are selectable by a stable id property (spec 9.1).
+            var property = request.ElementIdProperty?.Trim();
+            if (string.IsNullOrEmpty(property)) attrs.Remove("element_id_property");
+            else attrs["element_id_property"] = property;
+            asset.Segmented = !string.IsNullOrEmpty(property);
         }
         asset.Attrs = JsonSerializer.SerializeToDocument(attrs);
         await db.SaveChangesAsync(ct);
@@ -187,6 +209,72 @@ public partial class ModelService(AppDbContext db, IObjectStorage storage, Curre
                 : storage.PresignGet(prefix + resolved, lifetime);
         });
         return tileset;
+    }
+
+    /// <summary>
+    /// Reads the element ids of the model's GLB contents (server-side processing like the panorama analysis; nothing
+    /// is returned to the browser but the counts). At most <see cref="MaxCheckedContents"/> contents are opened.
+    /// </summary>
+    public async Task<ElementCheck> CheckElementsAsync(long id, CancellationToken ct)
+    {
+        var asset = await GetAsync(id, ct);
+        var property = AttrString(asset, "element_id_property")
+            ?? throw AppException.BadRequest("model.not_segmented", "Set element_id_property first.");
+        var keys = new List<string>();
+        var truncated = false;
+        if (asset.Kind == "gltf") keys.Add(asset.StorageKey);
+        else
+        {
+            var prefix = PrefixRegex().Match(asset.StorageKey).Value;
+            var pending = new Queue<string>([TilesetFile]);
+            var seen = new HashSet<string>();
+            while (pending.TryDequeue(out var relative) && keys.Count < MaxCheckedContents)
+            {
+                if (!seen.Add(relative)) continue;
+                var tileset = await ReadTilesetAsync(prefix + relative, ct);
+                var directory = relative.Contains('/') ? relative[..(relative.LastIndexOf('/') + 1)] : "";
+                RewriteTile(tileset["root"] as JsonObject, uri =>
+                {
+                    if (Uri.TryCreate(uri, UriKind.Absolute, out _)) return uri;
+                    var resolved = Resolve(directory, uri);
+                    if (resolved.EndsWith(".json", StringComparison.OrdinalIgnoreCase)) pending.Enqueue(resolved);
+                    else if (IsGlb(resolved)) keys.Add(prefix + resolved);
+                    return uri;
+                });
+            }
+            truncated = keys.Count > MaxCheckedContents || pending.Count > 0;
+            keys = keys.Distinct().Take(MaxCheckedContents).ToList();
+        }
+
+        int withoutProperty = 0, elements = 0, missing = 0;
+        var distinct = new HashSet<string>(StringComparer.Ordinal);
+        var duplicates = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var key in keys)
+        {
+            if ((await storage.SizeAsync(key, ct) ?? 0) > MaxCheckedBytes) { truncated = true; continue; }
+            await using var stream = await storage.OpenReadAsync(key, ct);
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory, ct);
+            List<List<string?>>? tables;
+            try { tables = GlbMetadata.ReadProperty(memory.ToArray(), property); }
+            catch (Exception e) when (e is FormatException or JsonException or ArgumentOutOfRangeException or KeyNotFoundException or InvalidOperationException)
+            {
+                throw AppException.BadRequest("model.invalid_glb", $"{key[(key.LastIndexOf('/') + 1)..]}: {e.Message}");
+            }
+            if (tables is null) { withoutProperty++; continue; }
+            foreach (var table in tables)
+            {
+                var inTable = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var value in table)
+                {
+                    elements++;
+                    if (value is null) { missing++; continue; }
+                    distinct.Add(value);
+                    if (!inTable.Add(value) && duplicates.Count < 50) duplicates.Add(value);
+                }
+            }
+        }
+        return new ElementCheck(property, keys.Count, withoutProperty, elements, distinct.Count, missing, duplicates.ToList(), truncated);
     }
 
     private async Task<JsonObject> ReadTilesetAsync(string key, CancellationToken ct)
