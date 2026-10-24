@@ -620,11 +620,21 @@ export class ModelViewer {
   private flyToNode(nodeId: number, duration = 1): void {
     const site = this.selection.site();
     if (!this.viewer || !site || this.tilesets.size === 0) return;
-    this.api.nodeAnchors(nodeId).subscribe((anchors) => {
-      if (!this.viewer || this.selection.nodeId() !== nodeId || anchors.length === 0) return;
+    this.api.nodeAnchors(nodeId).subscribe((own) => {
+      if (!this.viewer || this.selection.nodeId() !== nodeId) return;
+      // A node without own anchors (e.g. a process line): the boxes and elements of its subtree; else the overview.
+      const members = this.selection.highlightIds();
+      const anchors =
+        own.length > 0
+          ? own
+          : [...this.boxes(), ...this.elements()].filter((a) => members.has(a.nodeId));
+      if (anchors.length === 0) {
+        this.flyHome(duration);
+        return;
+      }
       const level = this.selection.levelId();
-      if (level != null && !anchors.some((a) => a.levelId === level))
-        this.selection.levelId.set(anchors[0].levelId);
+      if (own.length > 0 && level != null && !own.some((a) => a.levelId === level))
+        this.selection.levelId.set(own[0].levelId);
       // The exact 3D anchors (box, model element) if there are any; info points only mark an approximate place.
       const exact = anchors.filter((a) => a.kind === 'region' || a.kind === 'model_feature');
       const targets = exact.length > 0 ? exact : anchors;

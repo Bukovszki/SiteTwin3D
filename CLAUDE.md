@@ -86,7 +86,7 @@ docs/        ← SPECIFICATION.md, MAPMANAGER_EXTENSIONS.md, OPERATIONS.md (üze
 ## Tesztelés
 - Minden mérföldkőhöz automatikus tesztek; az elfogadási feltételek a specifikáció 12. fejezetében.
 - Adatbázis-integrációs tesztek valós PostgreSQL-lel (Testcontainers), különösen: a `path` triggerek (beszúrás, többszintű áthelyezés, ciklus elutasítása), a szervezeti szűrő, a horgonyok CHECK-kényszerei.
-- Mintaadat seed-szkriptként: kitalált szennyvíztisztító telep (2 épület, 3 szint, 1 technológiai vonal, néhány panoráma).
+- Mintaadat seed-szkriptként: kitalált szennyvíztisztító telep (2 épület, 3 szint, 1 technológiai vonal, néhány panoráma) – `deploy/dev/seed.mjs`, csak a nyilvános API-n át (bármely telepítésre), `--reset`-tel újra létrehozható. A szintetikus panorámák: `deploy/dev/seed/`.
 
 ## Ütemezés
 - 1. fázis (panorámaalapú MVP): M0–M5. 2. fázis (3D): M6–M9. Részletek: specifikáció 12. fejezet.
@@ -115,6 +115,8 @@ cd deploy && docker-compose -f docker-compose.yml -f docker-compose.local.yml -f
 
 # M6 mintamodell: a minta-alaprajz épülete GLB-ként (feltöltés: Előkészítés → 3D → feltöltés ikon; elhelyezés: a telephely pontja, 0 m, 0°)
 node deploy/dev/sample-model.mjs sample-building.glb
+# Mintatelep (szervezeti admin; a GeoServer-minta alaprajzával): https://localhost:8543 → „Minta szennyvíztisztító telep”
+SEED_PASSWORD=… node deploy/dev/seed.mjs --org demo --user admin --floorplan-layer ceg:alaprajz [--reset]
 # M7: szegmentált változat (EXT_mesh_features + EXT_structural_metadata, elemazonosító tulajdonság: element_id)
 node deploy/dev/sample-model.mjs --segmented
 

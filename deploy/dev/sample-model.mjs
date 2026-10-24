@@ -5,10 +5,9 @@
 // --segmented: every element gets a feature id (EXT_mesh_features) and a stable "element_id" in a property table
 // (EXT_structural_metadata), like a BIM export (spec 9.1) – element id property of the model: element_id.
 //   node dev/sample-model.mjs [out.glb] [--segmented]
+// Also a module: buildGlb(segmented) returns the GLB (used by seed.mjs).
 import { writeFileSync } from 'node:fs';
-
-const segmented = process.argv.includes('--segmented');
-const out = process.argv.slice(2).find((a) => !a.startsWith('--')) ?? (segmented ? 'sample-building-bim.glb' : 'sample-building.glb');
+import { pathToFileURL } from 'node:url';
 
 /** Axis-aligned box in ENU metres: [x0, x1] east, [y0, y1] north, [z0, z1] up; with its element id and name. */
 const materials = {
@@ -116,21 +115,23 @@ function boxGeometry(boxes) {
   return { pos: new Float32Array(pos), nor: new Float32Array(nor), fid: new Float32Array(fid), idx: new Uint32Array(idx) };
 }
 
-const gltf = { asset: { version: '2.0', generator: 'sample-model.mjs' }, scenes: [{ nodes: [0] }], scene: 0, nodes: [{ mesh: 0, name: 'Gépház' }],
-  meshes: [{ primitives: [] }], materials: [], accessors: [], bufferViews: [], buffers: [] };
-const chunks = [];
-let offset = 0;
-function view(typed, target) {
-  const bytes = Buffer.from(typed.buffer, typed.byteOffset, typed.byteLength);
-  gltf.bufferViews.push({ buffer: 0, byteOffset: offset, byteLength: bytes.length, ...(target ? { target } : {}) });
-  chunks.push(bytes);
-  offset += bytes.length;
-  const pad = (4 - (offset % 4)) % 4;
-  if (pad) {
-    chunks.push(Buffer.alloc(pad));
-    offset += pad;
-  }
-  return gltf.bufferViews.length - 1;
+/** The sample building as a GLB (Buffer); segmented: with element ids. */
+export function buildGlb(segmented) {
+  const gltf = { asset: { version: '2.0', generator: 'sample-model.mjs' }, scenes: [{ nodes: [0] }], scene: 0, nodes: [{ mesh: 0, name: 'Gépház' }],
+    meshes: [{ primitives: [] }], materials: [], accessors: [], bufferViews: [], buffers: [] };
+  const chunks = [];
+  let offset = 0;
+  function view(typed, target) {
+    const bytes = Buffer.from(typed.buffer, typed.byteOffset, typed.byteLength);
+    gltf.bufferViews.push({ buffer: 0, byteOffset: offset, byteLength: bytes.length, ...(target ? { target } : {}) });
+    chunks.push(bytes);
+    offset += bytes.length;
+    const pad = (4 - (offset % 4)) % 4;
+    if (pad) {
+      chunks.push(Buffer.alloc(pad));
+      offset += pad;
+    }
+    return gltf.bufferViews.length - 1;
 }
 for (const [name, m] of Object.entries(materials)) {
   const { pos, nor, fid, idx } = boxGeometry(m.boxes);
@@ -188,5 +189,13 @@ const chunk = (type, data) => {
   h.writeUInt32LE(type, 4);
   return Buffer.concat([h, data]);
 };
-writeFileSync(out, Buffer.concat([header, chunk(0x4e4f534a, json), chunk(0x004e4942, bin)]));
-console.log(`${out}: ${elements.length} elements${segmented ? ' (segmented)' : ''}, ${(12 + 16 + json.length + bin.length) / 1024 | 0} KiB`);
+return Buffer.concat([header, chunk(0x4e4f534a, json), chunk(0x004e4942, bin)]);
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const segmented = process.argv.includes('--segmented');
+  const out = process.argv.slice(2).find((a) => !a.startsWith('--')) ?? (segmented ? 'sample-building-bim.glb' : 'sample-building.glb');
+  const glb = buildGlb(segmented);
+  writeFileSync(out, glb);
+  console.log(`${out}: ${elements.length} elements${segmented ? ' (segmented)' : ''}, ${(glb.length / 1024) | 0} KiB`);
+}

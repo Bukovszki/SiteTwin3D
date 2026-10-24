@@ -64,10 +64,21 @@ public class SiteService(AppDbContext db)
     }
 
     /// <summary>Deletes the site with its hierarchy; refused (409) while panoramas still reference its nodes.</summary>
+    /// <summary>
+    /// Deletes the site with everything on it (organization admin). Rows that refer to its nodes without a cascade
+    /// (anchor and panorama levels, panorama and model nodes) go first: PostgreSQL checks those references while the
+    /// cascade is still running. The files become unreferenced and are removed by the storage cleanup (M9).
+    /// </summary>
     public async Task DeleteAsync(long id, CancellationToken ct)
     {
-        var deleted = await db.Sites.Where(s => s.Id == id).ExecuteDeleteAsync(ct);
-        if (deleted == 0) throw AppException.NotFound("site.not_found", $"Site {id} not found.");
+        if (!await db.Sites.AnyAsync(s => s.Id == id, ct)) throw AppException.NotFound("site.not_found", $"Site {id} not found.");
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        var nodes = db.Nodes.Where(n => n.SiteId == id);
+        await db.Anchors.Where(a => nodes.Any(n => n.Id == a.NodeId)).ExecuteDeleteAsync(ct);
+        await db.Panoramas.Where(p => nodes.Any(n => n.Id == p.NodeId)).ExecuteDeleteAsync(ct);
+        await db.ModelAssets.Where(m => m.SiteId == id).ExecuteDeleteAsync(ct);
+        await db.Sites.Where(s => s.Id == id).ExecuteDeleteAsync(ct);
+        await tx.CommitAsync(ct);
     }
 
     private static string ValidName(string? name)
