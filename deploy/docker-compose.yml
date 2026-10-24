@@ -79,6 +79,15 @@ services:
       Storage__PublicUrl: ${PUBLIC_URL:?Set PUBLIC_URL in .env}
       Storage__MaxPanoramaMb: ${MAX_PANORAMA_MB:-300}
       Storage__MaxModelMb: ${MAX_MODEL_MB:-4096}
+      # Housekeeping of the object store: unreferenced files after the grace period, expired panorama originals.
+      Cleanup__IntervalHours: ${CLEANUP_INTERVAL_HOURS:-6}
+      Cleanup__OrphanGraceHours: ${CLEANUP_GRACE_HOURS:-24}
+      Cleanup__DryRun: ${CLEANUP_DRY_RUN:-false}
+      # Logs: one JSON object per line (docker logs, log collectors); every line of a request carries its RequestId.
+      Logging__Console__FormatterName: json
+      Logging__Console__FormatterOptions__IncludeScopes: "true"
+      Logging__Console__FormatterOptions__UseUtcTimestamp: "true"
+      Logging__Console__FormatterOptions__TimestampFormat: "yyyy-MM-ddTHH:mm:ss.fffZ"
       # Service tokens of organizations' MapManager connections: MapManager__Tokens__<ref>=mmst_… (spec 6.3)
       # Behind Caddy: HTTPS is known from X-Forwarded-Proto (the API is not exposed).
       ReverseProxy__TrustForwardedHeaders: "true"

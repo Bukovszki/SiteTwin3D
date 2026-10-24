@@ -3,6 +3,7 @@ using Api.Data;
 using Api.Model;
 using Api.Services;
 using Api.Services.Auth;
+using Api.Services.Storage;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.EntityFrameworkCore;
 
@@ -38,8 +39,15 @@ public static partial class PlatformEndpoints
             .WithSummary("Name and active state; disabling ends the sessions of the organization's users (within 30 s)");
         group.MapPut("/{id:long}/mapmanager", SetMapManager).ProducesProblem(StatusCodes.Status400BadRequest)
             .WithSummary("MapManager base URL and service token reference (the token itself is in the secret store: MapManager:Tokens:<ref>)");
+        api.MapPost("/platform/storage/cleanup", Cleanup).WithTags("Platform").RequireAuthorization(Policies.Platform)
+            .WithSummary("Object store housekeeping now: unreferenced files after the grace period, expired panorama originals; dryRun (default true) only reports");
         return group;
     }
+
+    public record CleanupRequest(bool? DryRun);
+
+    private static async Task<Ok<CleanupReport>> Cleanup(CleanupRequest request, StorageJanitor janitor, CancellationToken ct) =>
+        TypedResults.Ok(await janitor.RunAsync(request.DryRun ?? true, ct));
 
     private static async Task<Ok<List<OrganizationDto>>> List(AppDbContext db, CancellationToken ct)
     {

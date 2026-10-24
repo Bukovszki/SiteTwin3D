@@ -62,12 +62,17 @@ builder.Services.AddScoped<LocationService>();
 builder.Services.AddScoped<AnchorService>();
 builder.Services.AddScoped<DrawService>();
 if (builder.Configuration.GetValue("Privacy:RunWorker", true)) builder.Services.AddHostedService<PanoramaWorker>();
+builder.Services.Configure<CleanupOptions>(builder.Configuration.GetSection(CleanupOptions.Section));
+builder.Services.AddScoped<StorageJanitor>();
+if (builder.Configuration.GetValue("Cleanup:RunWorker", true)) builder.Services.AddHostedService<StorageJanitorWorker>();
 // Container hosting: forwarded headers behind the reverse proxy, persistent data protection keys.
 builder.Services.AddDeploymentSupport(builder.Configuration);
 
 var app = builder.Build();
 
 app.UseDeploymentSupport();
+// Outermost after the forwarded headers: logs the final status of every request, errors included.
+app.UseMiddleware<RequestLogging>();
 app.UseExceptionHandler();
 
 if (app.Environment.IsDevelopment())

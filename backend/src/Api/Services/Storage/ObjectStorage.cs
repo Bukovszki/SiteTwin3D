@@ -35,6 +35,9 @@ public class StorageOptions
 /// passes the API in a request (NFR-3): the browser uploads and downloads with short-lived signed URLs; only the
 /// background processing (privacy blurring, display version) reads and writes objects server-side.
 /// </summary>
+/// <summary>An object of the store (listing).</summary>
+public record StoredObject(string Key, long Size, DateTime LastModified);
+
 public interface IObjectStorage
 {
     string PresignPut(string key, string contentType);
@@ -45,7 +48,7 @@ public interface IObjectStorage
     Task<Stream> OpenReadAsync(string key, CancellationToken ct);
     Task PutAsync(string key, Stream content, string contentType, CancellationToken ct);
     Task DeleteAsync(string key, CancellationToken ct);
-    Task<List<string>> ListAsync(string prefix, CancellationToken ct);
+    Task<List<StoredObject>> ListAsync(string prefix, CancellationToken ct);
     Task DeletePrefixAsync(string prefix, CancellationToken ct);
     Task EnsureBucketAsync(CancellationToken ct);
 }
@@ -97,15 +100,15 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
         Protocol = Protocol(_options.PublicUrl),
     });
 
-    public async Task<List<string>> ListAsync(string prefix, CancellationToken ct)
+    public async Task<List<StoredObject>> ListAsync(string prefix, CancellationToken ct)
     {
-        var keys = new List<string>();
+        var keys = new List<StoredObject>();
         var request = new ListObjectsV2Request { BucketName = _options.Bucket, Prefix = prefix };
         ListObjectsV2Response response;
         do
         {
             response = await _internal.ListObjectsV2Async(request, ct);
-            keys.AddRange((response.S3Objects ?? []).Select(o => o.Key));
+            keys.AddRange((response.S3Objects ?? []).Select(o => new StoredObject(o.Key, o.Size ?? 0, o.LastModified?.ToUniversalTime() ?? DateTime.MinValue)));
             request.ContinuationToken = response.NextContinuationToken;
         } while (response.IsTruncated == true);
         return keys;
@@ -113,7 +116,7 @@ public sealed class S3ObjectStorage : IObjectStorage, IDisposable
 
     public async Task DeletePrefixAsync(string prefix, CancellationToken ct)
     {
-        foreach (var key in await ListAsync(prefix, ct)) await DeleteAsync(key, ct);
+        foreach (var o in await ListAsync(prefix, ct)) await DeleteAsync(o.Key, ct);
     }
 
     public async Task<long?> SizeAsync(string key, CancellationToken ct)

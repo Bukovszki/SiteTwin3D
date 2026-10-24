@@ -93,7 +93,7 @@ public partial class ModelService(AppDbContext db, IObjectStorage storage, Curre
             throw AppException.BadRequest("model.name_required", "name is required.");
         if (request.NodeId is { } nodeId) await RequireNodeAsync(nodeId, siteId, ct);
 
-        var keys = await storage.ListAsync(prefix, ct);
+        var keys = (await storage.ListAsync(prefix, ct)).Select(o => o.Key).ToList();
         var asset = new ModelAsset { SiteId = siteId, NodeId = request.NodeId };
         var attrs = new JsonObject { ["name"] = request.Name.Trim() };
         if (keys.Contains(prefix + TilesetFile))

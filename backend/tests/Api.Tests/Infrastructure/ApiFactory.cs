@@ -33,6 +33,7 @@ public sealed class ApiFactory(PostgisFixture postgis) : WebApplicationFactory<P
         builder.UseSetting("Storage:SecretKey", PostgisFixture.StorageSecretKey);
         // Tests drive the panorama worker step by step (PanoramaTests.ProcessAllAsync).
         builder.UseSetting("Privacy:RunWorker", "false");
+        builder.UseSetting("Cleanup:RunWorker", "false");
         builder.ConfigureTestServices(services =>
         {
             if (FaceDetector is { } detector) services.AddSingleton(detector);

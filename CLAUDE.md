@@ -22,8 +22,8 @@ Ipari telephelyek digitális ikre: 360°-os panorámabejárás, alaprajz és (k�
 backend/     ← .NET API (src/Api, tests/Api.Tests; Backend.slnx)
 frontend/    ← Angular kliens (zoneless; a Cesium lusta betöltésű, viewer3d/)
 db/sql/      ← migrációk által futtatott SQL (triggerek, alaptípusok); beágyazott erőforrás, `SqlScripts.Load`
-deploy/      ← docker-compose.yml, .env.example, Caddyfile, mentés
-docs/        ← SPECIFICATION.md, MAPMANAGER_EXTENSIONS.md, kézikönyvek
+deploy/      ← docker-compose.yml, .env.example, Caddyfile, backup.sh / restore.sh
+docs/        ← SPECIFICATION.md, MAPMANAGER_EXTENSIONS.md, OPERATIONS.md (üzemeltetés)
 ```
 - Objektumtár: S3-kompatibilis; alapból **SeaweedFS** (a MinIO nem ad ki szabad konténerképet). A backend csak S3-at beszél, a tár cserélhető.
 - Felületi szövegek: `frontend/src/app/core/i18n/messages.hu.ts` (`inject(MESSAGES)`); a terméknév csak itt. Az API hibakódjainak (`code`) magyar szövege is itt van (`errors`).
@@ -33,6 +33,7 @@ docs/        ← SPECIFICATION.md, MAPMANAGER_EXTENSIONS.md, kézikönyvek
 - Objektumtár: a böngésző aláírt URL-lel, **azonos originen** éri el: a Caddy a `/objects/*` útvonalat (= a vödör neve) változatlan Host fejléccel adja tovább, így az S3-aláírás érvényes és CORS sem kell. A `/media/` foglalt (Angular betűtípusok). A `Storage:PublicUrl` = a felhasználók által megnyitott cím.
 - Panorámák (FR-P8): feldolgozási sor = a `panorama.privacy_status` (pending → review → rendering → approved | failed), háttérfeladat: `PanoramaWorker`. Arcfelismerés helyben: UltraFace RFB-640 ONNX (`backend/models/`, MIT), SkiaSharp (MIT) – ImageSharpot ne használj (licenc). A régiók képi szögekben (yaw 0 = képközép) vannak, a tájolástól függetlenül. A rendszámkeresés még nincs kész.
 - Horgonyok (FR-A): az 1. fázisban `point` és `panorama_point` (infopont: képi yaw/pitch + közelítő hely az alaprajzon; alaprajz nélkül a panoráma helye, `attrs.position_source = panorama_fallback`). M6 óta `region`/`box` is (doboz: középpont = `position` + `z_rel_m`, méretek méterben, tájolás északtól; a 3D-ben osztályozó térfogattal kiemelve, kattintáskor a legkisebb tartalmazó doboz nyer). M7 óta `model_feature` is (a stabil `element_id`, a modell `attrs.element_id_property` tulajdonsága szerint; egy elem egy rekordé). A sokszöghasáb még nincs kész.
+- Tártakarítás (M9): `Services/Storage/StorageJanitor` – az adatbázis által hivatkozott kulcsok (panoráma eredeti/megjelenítési kulcs, modellcsomag mappája) kivételével minden `org/` alatti fájl árva a türelmi idő után. Új fájltípusnál a hivatkozást itt is fel kell venni, különben a takarítás törli!
 - Funkcionális nézőpont (M8): a csomópont helye `located_in` (egy, explicit) vagy a legkisebb tartalmazó helyszíni doboz (`Services/Locations`); a kijelölt csomópont részfáját a `SelectionService.members`/`highlightIds` tölti be egy helyen, ezt használja a 3D-nézet és az adatlap.
 - Illesztés 3D-ben: `core/geo/snap.ts` (helyi sík valós méterben, csúcs > él), forrás: `GET /sites/{id}/floors/{levelId}/geometry` (rajzi rétegek + MapManager WFS). A Cesiumban a modellelem kiválasztásához `drillPick` kell (a dobozok osztályozó térfogata eltakarja), és a `pickPosition`-t előtte kell hívni.
 - Bejárás: a szomszédság kézi kapcsolat (`panorama_link`, mindkét irányban); az automatikus összekötés csak javaslat (legközelebbiek `geography`-távolsággal), utána kézzel javítható.
@@ -114,6 +115,9 @@ cd deploy && docker-compose -f docker-compose.yml -f docker-compose.local.yml -f
 node deploy/dev/sample-model.mjs sample-building.glb
 # M7: szegmentált változat (EXT_mesh_features + EXT_structural_metadata, elemazonosító tulajdonság: element_id)
 node deploy/dev/sample-model.mjs --segmented
+
+# Mentés / visszaállítás helyben (Podman): docs/OPERATIONS.md
+cd deploy && COMPOSE="docker-compose -f docker-compose.yml -f docker-compose.local.yml" ENGINE=podman ./backup.sh
 
 # Frontend (http://localhost:4200; /api és /health → localhost:5032, proxy.conf.mjs)
 # A futó compose stack API-jához: API_URL=https://localhost:8543 npm start
