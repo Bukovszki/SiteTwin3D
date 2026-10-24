@@ -181,7 +181,7 @@ type Tool = 'box' | 'point' | 'element';
         }
         @if (can.anchors()) {
           <p-button
-            icon="pi pi-box"
+            icon="pi pi-file-excel"
             [text]="true"
             size="small"
             [pTooltip]="m.boxImport.open"

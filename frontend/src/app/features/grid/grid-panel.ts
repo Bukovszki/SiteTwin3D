@@ -64,7 +64,7 @@ const ANCHOR_ICONS: Record<string, string> = {
         <p-button icon="pi pi-link" [text]="true" size="small" [pTooltip]="m.grid.link" (onClick)="linking.set(true)" />
       }
       @if (can.anchors()) {
-        <p-button icon="pi pi-box" [text]="true" size="small" [pTooltip]="m.boxImport.open" (onClick)="importingBoxes.set(true)" />
+        <p-button icon="pi pi-file-excel" [text]="true" size="small" [pTooltip]="m.boxImport.open" (onClick)="importingBoxes.set(true)" />
       }
       <p-button icon="pi pi-refresh" [text]="true" size="small" [pTooltip]="m.common.refresh" (onClick)="reload()" />
     </div>
