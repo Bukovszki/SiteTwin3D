@@ -203,6 +203,26 @@ export interface ImportRow {
   attrs: Record<string, unknown>;
 }
 
+/** A box row of the box import (cells as read: text or number; the API converts them). */
+export interface BoxImportRow {
+  code?: string;
+  level?: string;
+  east?: unknown;
+  north?: unknown;
+  bottom?: unknown;
+  sizeX?: unknown;
+  sizeY?: unknown;
+  sizeZ?: unknown;
+  heading?: unknown;
+}
+
+export interface BoxImportResult {
+  created: number;
+  updated: number;
+  removed: number;
+  records: number;
+}
+
 export interface ImportError {
   row: number;
   code: string;

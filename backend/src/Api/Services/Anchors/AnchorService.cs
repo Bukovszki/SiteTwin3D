@@ -15,6 +15,8 @@ public static class PositionSources
     public const string Manual = "manual";
     /// <summary>No floorplan on the level: temporarily the panorama's own position.</summary>
     public const string PanoramaFallback = "panorama_fallback";
+    /// <summary>Bulk import from a table (boxes).</summary>
+    public const string Import = "import";
 }
 
 /// <summary>
@@ -242,9 +244,10 @@ public class AnchorService(AppDbContext db, CurrentUser currentUser)
             throw AppException.BadRequest("level.invalid", "levelId must be a level of the same site.");
     }
 
-    private static JsonDocument AttrsWithSource(JsonDocument? attrs, string source)
+    /// <param name="trusted">Set by the server itself (e.g. the box import); a client may only send manual or panorama_fallback.</param>
+    internal static JsonDocument AttrsWithSource(JsonDocument? attrs, string source, bool trusted = false)
     {
-        if (source is not (PositionSources.Manual or PositionSources.PanoramaFallback))
+        if (!trusted && source is not (PositionSources.Manual or PositionSources.PanoramaFallback))
             throw AppException.BadRequest("anchor.invalid_position_source", "positionSource: manual or panorama_fallback.");
         var obj = attrs is null ? new JsonObject() : JsonNode.Parse(attrs.RootElement.GetRawText())!.AsObject();
         obj["position_source"] = source;

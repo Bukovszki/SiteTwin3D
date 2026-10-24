@@ -18,6 +18,7 @@ import { Permissions } from '../../core/auth/permissions';
 import { MESSAGES } from '../../core/i18n/messages';
 import { SelectionService } from '../../core/selection/selection.service';
 import { schemaFields } from '../datasheet/schema-form';
+import { BoxImportDialog } from '../import/box-import-dialog';
 import { ImportDialog } from '../import/import-dialog';
 import { LinkDialog } from '../link/link-dialog';
 import { GridColumn, formatValue, parseFilter } from './grid-columns';
@@ -47,7 +48,7 @@ const ANCHOR_ICONS: Record<string, string> = {
  */
 @Component({
   selector: 'app-grid-panel',
-  imports: [FormsModule, TableModule, Button, Select, InputText, InputNumber, IconField, InputIcon, Tag, Tooltip, ImportDialog, LinkDialog],
+  imports: [FormsModule, TableModule, Button, Select, InputText, InputNumber, IconField, InputIcon, Tag, Tooltip, ImportDialog, LinkDialog, BoxImportDialog],
   template: `
     <div class="panel-toolbar">
       <p-select [options]="sourceOptions()" [group]="true" optionLabel="label" optionValue="value" optionGroupLabel="label"
@@ -61,6 +62,9 @@ const ANCHOR_ICONS: Record<string, string> = {
       @if (can.prepare()) {
         <p-button icon="pi pi-file-import" [text]="true" size="small" [pTooltip]="m.grid.import" (onClick)="importing.set(true)" />
         <p-button icon="pi pi-link" [text]="true" size="small" [pTooltip]="m.grid.link" (onClick)="linking.set(true)" />
+      }
+      @if (can.anchors()) {
+        <p-button icon="pi pi-box" [text]="true" size="small" [pTooltip]="m.boxImport.open" (onClick)="importingBoxes.set(true)" />
       }
       <p-button icon="pi pi-refresh" [text]="true" size="small" [pTooltip]="m.common.refresh" (onClick)="reload()" />
     </div>
@@ -174,6 +178,11 @@ const ANCHOR_ICONS: Record<string, string> = {
         <app-link-dialog [(visible)]="linking" [layer]="source()?.kind === 'layer' ? $any(source()).layer : ''" />
       }
     }
+    @if (can.anchors()) {
+      @defer (when importingBoxes()) {
+        <app-box-import-dialog [(visible)]="importingBoxes" />
+      }
+    }
   `,
   styles: `
     :host {
@@ -225,6 +234,7 @@ export class GridPanel {
   protected readonly search = signal('');
   protected readonly filterValues = signal<Record<string, unknown>>({});
   protected readonly importing = signal(false);
+  protected readonly importingBoxes = signal(false);
   protected readonly linking = signal(false);
   protected pageSize = 50;
   private first = 0;

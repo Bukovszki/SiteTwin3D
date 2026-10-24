@@ -17,6 +17,7 @@ import {
   CallbackProperty,
   Cartesian2,
   Cartesian3,
+  Cartesian4,
   Cartographic,
   Cesium3DTileFeature,
   Cesium3DTileStyle,
@@ -69,7 +70,9 @@ import {
   handlePosition,
   smallestContaining,
 } from './box-math';
+import { handleAxis, handleCursor, handleIcon } from './handle-icons';
 import { ModelsDialog } from './models-dialog';
+import { BoxImportDialog } from '../features/import/box-import-dialog';
 
 /** A box being shown or edited: the anchor plus its centre in ECEF. */
 interface BoxDraft extends BoxShape {
@@ -101,7 +104,16 @@ type Tool = 'box' | 'point' | 'element';
  */
 @Component({
   selector: 'app-model-viewer',
-  imports: [FormsModule, Button, InputNumber, Message, Select, Tooltip, ModelsDialog],
+  imports: [
+    FormsModule,
+    Button,
+    InputNumber,
+    Message,
+    Select,
+    Tooltip,
+    ModelsDialog,
+    BoxImportDialog,
+  ],
   template: `
     <div #container class="scene" [class.placing]="tool() != null"></div>
     @if (error()) {
@@ -166,6 +178,15 @@ type Tool = 'box' | 'point' | 'element';
               [ariaLabel]="m.viewer3d.snap"
             />
           </span>
+        }
+        @if (can.anchors()) {
+          <p-button
+            icon="pi pi-box"
+            [text]="true"
+            size="small"
+            [pTooltip]="m.boxImport.open"
+            (onClick)="boxImportOpen.set(true)"
+          />
         }
         @if (can.prepare()) {
           <p-button
@@ -247,7 +268,20 @@ type Tool = 'box' | 'point' | 'element';
             />
           </div>
           <small class="muted">{{ m.box.handles }}</small>
+          @if (boxDirty()) {
+            <p-message severity="warn" size="small">{{ m.box.pending }}</p-message>
+          }
           <div class="actions">
+            @if (boxDirty()) {
+              <p-button
+                icon="pi pi-undo"
+                [label]="m.box.discard"
+                severity="secondary"
+                [text]="true"
+                size="small"
+                (onClick)="discardEditing()"
+              />
+            }
             <p-button
               icon="pi pi-trash"
               [label]="m.box.delete"
@@ -263,6 +297,11 @@ type Tool = 'box' | 'point' | 'element';
     @if (can.prepare()) {
       @defer (when modelsOpen()) {
         <app-models-dialog [(visible)]="modelsOpen" (changed)="loadModels()" />
+      }
+    }
+    @if (can.anchors()) {
+      @defer (when boxImportOpen()) {
+        <app-box-import-dialog [(visible)]="boxImportOpen" />
       }
     }
   `,
@@ -390,6 +429,7 @@ export class ModelViewer {
     () => (this.selection.members()?.members.length ?? 0) > 0 && this.selection.levelId() == null,
   );
   protected readonly modelsOpen = signal(false);
+  protected readonly boxImportOpen = signal(false);
   /** The box whose handles are shown (editors). */
   protected readonly editing = signal<BoxDraft | null>(null);
 
@@ -413,12 +453,17 @@ export class ModelViewer {
     from: [number, number, number];
   } | null = null;
   private dragged = false;
+  /** The edited box has a change not saved yet (saved when the box is left). */
+  protected readonly boxDirty = signal(false);
+  private hoveredHandle: Handle | null = null;
   /** The node just selected by a click here: the camera stays where the user is looking. */
   private pickedHere: number | null = null;
 
   constructor() {
     afterNextRender(() => this.create());
     inject(DestroyRef).onDestroy(() => {
+      // Leaving the 3D view ends the editing: a pending box change is saved.
+      if (this.boxDirty()) this.saveEditing(this.editing());
       this.handler?.destroy();
       this.viewer?.destroy();
     });
@@ -442,6 +487,14 @@ export class ModelViewer {
       this.places();
       this.xray();
       untracked(() => this.drawBoxes());
+    });
+    // Another node selected (here or in another view): the box's selection is over, its change is saved.
+    effect(() => {
+      const nodeId = this.selection.nodeId();
+      untracked(() => {
+        const editing = this.editing();
+        if (editing && editing.anchor.nodeId !== nodeId) this.stopEditing();
+      });
     });
     // Leaving the editing modes ends the editing.
     effect(() => {
@@ -522,6 +575,7 @@ export class ModelViewer {
       ScreenSpaceEventType.LEFT_DOWN,
     );
     this.handler.setInputAction((e: { endPosition: Cartesian2 }) => {
+      this.hoverHandle(e.endPosition);
       this.pointerMove(e.endPosition);
       this.preview(e.endPosition);
     }, ScreenSpaceEventType.MOUSE_MOVE);
@@ -557,7 +611,9 @@ export class ModelViewer {
       const editing = this.editing();
       if (editing) {
         const fresh = boxes.find((b) => b.id === editing.anchor.id);
-        if (fresh) this.edit(fresh);
+        // A pending change stays as drawn (saved when the box is left); else the box as stored.
+        if (fresh && this.boxDirty()) this.editing.set({ ...editing, anchor: fresh });
+        else if (fresh) this.edit(fresh);
         else this.stopEditing();
       }
     });
@@ -752,12 +808,27 @@ export class ModelViewer {
     return site.baseHeightM + level.elevationM + height - CUT_BELOW_CEILING;
   }
 
+  /**
+   * The level cut. Each tileset keeps one clipping plane collection: only its frame and `enabled` change. Assigning a
+   * new collection destroys the old one while tiles may still draw with its texture (render error "reading
+   * '_target'").
+   */
   private applyClipping(): void {
     const site = this.selection.site();
     const cut = this.cutHeight();
     for (const tileset of this.tilesets.values()) {
+      let planes = tileset.clippingPlanes;
+      if (!planes) {
+        planes = new ClippingPlaneCollection({
+          planes: [new ClippingPlane(new Cartesian3(0, 0, -1), 0)],
+          edgeWidth: 1.5,
+          edgeColor: Color.fromCssColorString('#475569'),
+          enabled: false,
+        });
+        tileset.clippingPlanes = planes;
+      }
       if (cut == null || !site) {
-        tileset.clippingPlanes = undefined as unknown as ClippingPlaneCollection;
+        planes.enabled = false;
         continue;
       }
       // The plane's frame is relative to the tileset's clipping origin (root transform, or ENU at the bounding sphere
@@ -765,7 +836,7 @@ export class ModelViewer {
       const enu = Transforms.eastNorthUpToFixedFrame(
         Cartesian3.fromDegrees(site.refPoint.coordinates[0], site.refPoint.coordinates[1], cut),
       );
-      const modelMatrix = Matrix4.multiply(
+      planes.modelMatrix = Matrix4.multiply(
         Matrix4.inverse(
           (tileset as unknown as { clippingPlanesOriginMatrix: Matrix4 })
             .clippingPlanesOriginMatrix,
@@ -774,12 +845,7 @@ export class ModelViewer {
         enu,
         new Matrix4(),
       );
-      tileset.clippingPlanes = new ClippingPlaneCollection({
-        planes: [new ClippingPlane(new Cartesian3(0, 0, -1), 0)],
-        modelMatrix,
-        edgeWidth: 1.5,
-        edgeColor: Color.fromCssColorString('#475569'),
-      });
+      planes.enabled = true;
     }
   }
 
@@ -1118,16 +1184,25 @@ export class ModelViewer {
               new Cartesian3(),
             );
           }, false) as never,
-          point: {
-            pixelSize: handle === 'move' ? 16 : 12,
-            color:
-              handle === 'rotate'
-                ? Color.fromCssColorString('#a855f7')
-                : handle === 'move'
-                  ? Color.WHITE
-                  : Color.fromCssColorString('#2563eb'),
-            outlineColor: handle === 'move' ? Color.fromCssColorString('#2563eb') : Color.WHITE,
-            outlineWidth: 2,
+          billboard: {
+            image: handleIcon(handle),
+            width: handle === 'move' ? 34 : 28,
+            height: handle === 'move' ? 34 : 28,
+            // The arrow lies along the side's axis in 3D, so it shows which way the side moves.
+            alignedAxis: new CallbackProperty(() => {
+              const d = draft();
+              const axis = handleAxis(handle);
+              if (!d || axis == null) return Cartesian3.ZERO;
+              const column = Matrix4.getColumn(this.frameOf(d), axis, new Cartesian4());
+              return Cartesian3.normalize(
+                new Cartesian3(column.x, column.y, column.z),
+                new Cartesian3(),
+              );
+            }, false) as never,
+            scale: new CallbackProperty(() => (this.hoveredHandle === handle ? 1.25 : 1), false),
+            // The height handle sits on the top's centre: lifted on screen so that from above it is not under the
+            // move handle (dragging works with the pointer's movement, the offset does not matter).
+            pixelOffset: handle === '+z' ? new Cartesian2(0, -26) : Cartesian2.ZERO,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
         }),
@@ -1136,13 +1211,21 @@ export class ModelViewer {
   }
 
   private edit(anchor: Anchor): void {
+    // Another box: the previous one's pending change is saved first.
+    if (this.editing()?.anchor.id !== anchor.id && this.boxDirty())
+      this.saveEditing(this.editing());
+    this.boxDirty.set(false);
     this.editing.set(this.draftOf(anchor));
     this.drawBoxes();
     this.drawSnapTargets();
   }
 
+  /** Ends the editing of the box; a pending change is saved now (with a reason if the record is finalized). */
   protected stopEditing(): void {
-    if (!this.editing()) return;
+    const editing = this.editing();
+    if (!editing) return;
+    if (this.boxDirty()) this.saveEditing(editing);
+    this.boxDirty.set(false);
     this.editing.set(null);
     this.drawBoxes();
     this.drawSnapTargets();
@@ -1171,6 +1254,19 @@ export class ModelViewer {
     const o = Matrix4.multiplyByPoint(inverse, ray.origin, new Cartesian3());
     const d = Matrix4.multiplyByPointAsVector(inverse, ray.direction, new Cartesian3());
     return { o: [o.x, o.y, o.z], d: [d.x, d.y, d.z] };
+  }
+
+  /** The handle under the pointer grows and the cursor shows what it does (only while a box is edited). */
+  private hoverHandle(position: Cartesian2): void {
+    const canvas = this.viewer?.scene.canvas;
+    if (!canvas) return;
+    const handle = this.drag
+      ? this.drag.handle
+      : this.editing()
+        ? this.pickedHandle(position)
+        : null;
+    this.hoveredHandle = handle;
+    canvas.style.cursor = !handle ? '' : this.drag ? 'grabbing' : handleCursor(handle);
   }
 
   private pointerDown(position: Cartesian2): void {
@@ -1207,7 +1303,8 @@ export class ModelViewer {
     if (!this.drag) return;
     this.drag = null;
     this.viewer!.scene.screenSpaceCameraController.enableInputs = true;
-    if (this.dragged) this.saveEditing();
+    // Not saved yet: saved when the box is left (moving it in several steps asks for one reason).
+    if (this.dragged) this.boxDirty.set(true);
   }
 
   private click(position: Cartesian2): void {
@@ -1418,11 +1515,18 @@ export class ModelViewer {
       center = Matrix4.multiplyByPoint(this.frameOf(editing), lift, new Cartesian3());
     }
     this.editing.set({ ...editing, [field]: value, center });
-    this.saveEditing();
+    this.boxDirty.set(true);
   }
 
-  private saveEditing(): void {
-    const box = this.editing();
+  /** The pending change dropped: the box as stored. */
+  protected discardEditing(): void {
+    const editing = this.editing();
+    if (!editing) return;
+    this.boxDirty.set(false);
+    this.editing.set(this.draftOf(editing.anchor));
+  }
+
+  private saveEditing(box: BoxDraft | null): void {
     const site = this.selection.site();
     if (!box || !site) return;
     const carto = Cartographic.fromCartesian(box.center);
@@ -1442,11 +1546,17 @@ export class ModelViewer {
         sizeZ: round(box.sizeZ),
         headingDeg: round(box.headingDeg, 1),
       })
-      .subscribe((anchor) => {
-        this.boxes.update((list) => list.map((b) => (b.id === anchor.id ? anchor : b)));
-        if (this.editing()?.anchor.id === anchor.id)
-          this.editing.set({ ...this.editing()!, anchor });
-        this.toasts.add({ severity: 'success', summary: this.m.box.saved, life: 1500 });
+      .subscribe({
+        next: (anchor) => {
+          this.boxes.update((list) => list.map((b) => (b.id === anchor.id ? anchor : b)));
+          if (this.editing()?.anchor.id === anchor.id)
+            this.editing.set({ ...this.editing()!, anchor });
+          this.toasts.add({ severity: 'success', summary: this.m.box.saved, life: 1500 });
+          // The map and the data sheet show the box's new place.
+          this.selection.changed();
+        },
+        // Refused or no reason given: the box is drawn as stored.
+        error: () => this.drawBoxes(),
       });
   }
 
@@ -1458,6 +1568,7 @@ export class ModelViewer {
       rejectButtonProps: { label: this.m.common.cancel, severity: 'secondary', text: true },
       accept: () =>
         this.api.deleteAnchor(box.anchor.id).subscribe(() => {
+          this.boxDirty.set(false);
           this.editing.set(null);
           this.boxes.update((list) => list.filter((b) => b.id !== box.anchor.id));
           this.selection.changed();

@@ -11,6 +11,8 @@ import {
   Floorplan,
   GridFilter,
   GridPage,
+  BoxImportResult,
+  BoxImportRow,
   ImportRow,
   LayerField,
   LayerGridPage,
@@ -138,7 +140,11 @@ export class ApiService {
   }
   importAttributes(siteId: number, typeId: number, parentId: number | null, rows: ImportRow[], context?: HttpContext): Observable<{ created: number; updated: number }> {
     return this.http.post<{ created: number; updated: number }>(`${API}/sites/${siteId}/import/attributes`, { typeId, parentId, rows }, { context });
+  }  /** Bounding boxes from a table: a record's rows (by code) replace its boxes; centres in the given system. */
+  importBoxes(siteId: number, srs: string, rows: BoxImportRow[], context?: HttpContext): Observable<BoxImportResult> {
+    return this.http.post<BoxImportResult>(`${API}/sites/${siteId}/import/boxes`, { srs, rows }, { context });
   }
+
 
   // MapManager link
   mapManagerFields(layer: string, context?: HttpContext): Observable<LayerField[]> {

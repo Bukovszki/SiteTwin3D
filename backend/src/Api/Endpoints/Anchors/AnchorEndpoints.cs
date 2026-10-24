@@ -45,6 +45,8 @@ public static class AnchorEndpoints
             .WithSummary("Anchors of a level (levelId=…) or outdoor ones (no levelId), for the floorplan; allLevels=true: the whole site; kind=…: only that kind");
         api.MapGet("/sites/{siteId:long}/places", Places).WithTags("Anchors").RequireAuthorization(Policies.Member)
             .WithSummary("One place per node (model element / box → point → info point): levelId=… for a level, none for outdoor, allLevels=true: the whole site");
+        api.MapPost("/sites/{siteId:long}/import/boxes", ImportBoxes).WithTags("Anchors").RequireAuthorization(Policies.Editor)
+            .WithSummary("Bulk import of bounding boxes (rows read from CSV/XLSX by the client): a record's rows replace its boxes; centres from srs to WGS84; all or nothing");
         api.MapGet("/nodes/{id:long}/place", PlaceOf).WithTags("Anchors").RequireAuthorization(Policies.Member)
             .WithSummary("The single place of a node (null: none yet)");
         api.MapPatch("/anchors/{id:long}", Update).WithTags("Anchors").RequireAuthorization(Policies.Editor)
@@ -64,6 +66,9 @@ public static class AnchorEndpoints
 
     private static async Task<Ok<List<AnchorDto>>> OfNode(long id, AnchorService anchors, CancellationToken ct) =>
         TypedResults.Ok((await anchors.OfNodeAsync(id, ct)).Select(AnchorDto.From).ToList());
+
+    private static async Task<Ok<BoxImportResult>> ImportBoxes(long siteId, BoxImportRequest request, BoxImportService import, CancellationToken ct) =>
+        TypedResults.Ok(await import.ImportAsync(siteId, request, ct));
 
     private static async Task<Created<AnchorDto>> Create(long id, AnchorCreate request, AnchorService anchors, CancellationToken ct)
     {

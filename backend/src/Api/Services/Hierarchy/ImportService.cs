@@ -162,7 +162,7 @@ public class ImportService(AppDbContext db, NodeService nodes)
         return ok ? result : null;
     }
 
-    private static JsonNode? ToNumber(JsonElement value, bool integer)
+    internal static JsonNode? ToNumber(JsonElement value, bool integer)
     {
         double number;
         if (value.ValueKind == JsonValueKind.Number) number = value.GetDouble();

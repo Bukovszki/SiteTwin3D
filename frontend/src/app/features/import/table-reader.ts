@@ -29,7 +29,8 @@ async function readXlsx(file: File): Promise<unknown[][]> {
   return (await readSheet(file)) as unknown[][];
 }
 
-const normalize = (text: string) =>
+/** A header for matching: lower case, no accents, no parenthesized part, letters and digits only. */
+export const normalize = (text: string) =>
   text
     .toLocaleLowerCase('hu')
     .normalize('NFD')

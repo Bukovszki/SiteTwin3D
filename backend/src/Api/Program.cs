@@ -73,6 +73,7 @@ builder.Services.AddScoped<LocationService>();
 builder.Services.AddScoped<ChangeContext>();
 builder.Services.AddScoped<HistoryService>();
 builder.Services.AddScoped<AnchorService>();
+builder.Services.AddScoped<BoxImportService>();
 builder.Services.AddScoped<DrawService>();
 if (builder.Configuration.GetValue("Privacy:RunWorker", true)) builder.Services.AddHostedService<PanoramaWorker>();
 builder.Services.Configure<CleanupOptions>(builder.Configuration.GetSection(CleanupOptions.Section));
