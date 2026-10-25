@@ -122,6 +122,8 @@ services:
       S3_ACCESS_KEY: ${STORAGE_ACCESS_KEY}
       S3_SECRET_KEY: ${STORAGE_SECRET_KEY}
       CONVERTER_MAX_POINTS: ${CONVERTER_MAX_POINTS:-30000000}
+      # A ZIP upload unpacked at most this large (MB): a broken or malicious archive stops early.
+      CONVERTER_MAX_UNPACKED_MB: ${CONVERTER_MAX_UNPACKED_MB:-20480}
     mem_limit: ${CONVERTER_MEMORY:-4g}
     depends_on:
       storage:

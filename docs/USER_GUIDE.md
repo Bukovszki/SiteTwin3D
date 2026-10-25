@@ -188,6 +188,8 @@ A rendszer a háttérben arcokat keres a képen. Amíg ez fut, a panoráma álla
 
 A helyszíni fában a berendezések (🔗 jellel) a helyük alatt látszanak; akinek még nincs helye, a **Hely nélkül** csoportban van.
 
+- **Létrehozás közvetlenül a helyiség alatt:** jelölje ki a helyiséget → **+** → a típuslistában a *Berendezés ide (…)* csoportból válasszon (pl. *Berendezés*) → opcionálisan a **funkcionális szülő** (pl. a technológiai vonal) → **Létrehozás**. A berendezés a funkcionális fába kerül, a helye ez a helyiség lesz.
+
 - **Áthúzással:** húzza a berendezést a **Hely nélkül** csoportból (vagy egy másik helyiségből) a helyiségre → „*„Befolyó szivattyú 1” helye legyen: Szivattyútér?*” → **Igen**. A funkcionális fában a berendezés a vonala alatt marad.
 - **Az adatlapon:** *Helye* → **Hely megadása** listából.
 - **Dobozzal:** ha a berendezésnek van doboza a 3D-ben, a helye magától a legkisebb, őt tartalmazó helyiségdoboz (az adatlapon „doboz alapján”). A megadott hely ezt felülírja.
@@ -203,6 +205,8 @@ A helyszíni fában a berendezések (🔗 jellel) a helyük alatt látszanak; ak
 3. Egy panorámán egy rekordnak egy infopontja van; újra lerakva áthelyeződik.
 
 **Infopontok áthelyezése** (véletlen elmozdítás ellen munkamenetben): **Infopontok áthelyezése** gomb → húzza az infopontokat a panorámán vagy a jelölőket az alaprajzon → a sávon **Mentés** vagy **Elvetés**.
+
+**Pont az alaprajzon:** jelölje ki a rekordot → a térkép eszköztárán a **jelölő** gomb (*… helyének kijelölése az alaprajzon*) → kattintson az alaprajzra. A pont a kiválasztott szintre, a padlóra kerül; újra kijelölve áthelyeződik. Ehhez nem kell sem 3D modell, sem panoráma.
 
 **Pont a 3D-ben:** 3D fül → **Pont lerakása** (jelölő ikon) → kattintson a modellre. Az *Illesztés (m)* mezőben megadott távolságon belül a pont az alaprajz legközelebbi sarkára vagy élére ugrik.
 

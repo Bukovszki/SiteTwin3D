@@ -53,6 +53,8 @@ function detectMain(paths: string[]): string | null {
 }
 
 function detectFormat(paths: string[]): string | null {
+  // A ZIP of a model with its files: the converter unpacks it and finds the model in it.
+  if (paths.length === 1 && ext(paths[0]) === '.zip') return 'zip';
   const main = detectMain(paths);
   if (!main) return null;
   if (main === 'tileset.json') return '3dtiles';
@@ -239,7 +241,7 @@ interface PendingFile {
           />
           <small class="muted">{{ m.models.nodeHint }}</small>
         </div>
-        @if (!edited() && format() === 'pointcloud') {
+        @if (!edited() && (format() === 'pointcloud' || format() === 'zip')) {
           <div class="field">
             <label for="model-srs">{{ m.models.srs }}</label>
             <input pInputText id="model-srs" [(ngModel)]="srs" placeholder="EPSG:23700" />
@@ -398,14 +400,21 @@ export class ModelsDialog {
     { value: 'tiles', label: this.m.models.tiles },
   ];
   protected source: 'file' | 'tiles' = 'file';
-  protected readonly accept = ['.glb', '.ifc', ...MESH, ...COMPANIONS, ...POINT_CLOUDS].join(',');
+  protected readonly accept = [
+    '.zip',
+    '.glb',
+    '.ifc',
+    ...MESH,
+    ...COMPANIONS,
+    ...POINT_CLOUDS,
+  ].join(',');
   protected srs = '';
   protected placeIt = false;
   /** What the chosen files are (same rules as the API): glb | ifc | mesh | pointcloud | 3dtiles. */
   protected readonly format = computed(() => detectFormat(this.files().map((f) => f.path)));
   /** IFC and point clouds may place themselves (georeference / coordinate system). */
   protected readonly placementOptional = computed(
-    () => this.format() === 'ifc' || this.format() === 'pointcloud',
+    () => this.format() === 'ifc' || this.format() === 'pointcloud' || this.format() === 'zip',
   );
   protected name = '';
   /** The location node the model belongs to (data tree; null: the whole site). */
@@ -456,7 +465,12 @@ export class ModelsDialog {
 
   protected showElementId(): boolean {
     const edited = this.edited();
-    if (edited) return edited.sourceFormat == null || edited.sourceFormat === 'ifc';
+    if (edited)
+      return (
+        edited.sourceFormat == null ||
+        edited.sourceFormat === 'ifc' ||
+        edited.sourceFormat === 'glb'
+      );
     return this.source === 'tiles' || this.format() === 'glb';
   }
 
@@ -559,7 +573,10 @@ export class ModelsDialog {
             nodeId: this.nodeId,
             placement: this.showPlacement() ? this.placement : null,
             elementIdProperty: this.showElementId() ? this.elementIdProperty.trim() || null : null,
-            srs: this.format() === 'pointcloud' ? this.srs.trim() || null : null,
+            srs:
+              this.format() === 'pointcloud' || this.format() === 'zip'
+                ? this.srs.trim() || null
+                : null,
           },
           silent(),
         ),

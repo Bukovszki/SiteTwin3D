@@ -85,6 +85,40 @@ public sealed class ModelConversionTests(PostgisFixture postgis) : ApiTestBase(p
     }
 
     [Fact]
+    public async Task Zip_IsUnpackedByTheConverter_AndBecomesWhatWasInIt()
+    {
+        var (org, site) = await SiteAsync();
+        var prefix = await UploadAsync(org, site, "szivattyuhaz.zip");
+        var withOthers = await TicketAsync(org, site, "szivattyuhaz.zip", "readme.txt");
+        Factory.Converter.Answer = job => new JsonObject
+        {
+            ["kind"] = "gltf", ["key"] = job.GetProperty("outputPrefix").GetString() + "model.glb", ["segmented"] = false,
+            ["format"] = "mesh", ["main"] = "Szivattyuhaz/pump.fbx",
+            ["warnings"] = new JsonArray("Missing texture(s), shown grey: rust.tga"),
+        };
+
+        // No placement needed up front (an IFC or a point cloud in it may place itself); a mesh goes to the site point.
+        var created = await TestApi.ReadJson(await org.Http.PostAsJsonAsync($"/api/v1/sites/{site}/models", new { prefix, name = "Szivattyúház" }));
+        var id = created.GetProperty("id").GetInt64();
+        Assert.True(await ConvertAsync());
+        var model = await org.Http.GetFromJsonAsync<JsonElement>($"/api/v1/models/{id}");
+        var job = Assert.Single(Factory.Converter.Jobs);
+        var conversion = model.GetProperty("conversion");
+
+        Assert.Equal(HttpStatusCode.BadRequest, withOthers.StatusCode); // a ZIP comes alone
+        Assert.Equal("converting", created.GetProperty("status").GetString());
+        Assert.Equal("zip", created.GetProperty("sourceFormat").GetString());
+        Assert.Equal("zip", job.GetProperty("format").GetString());
+        Assert.Equal(prefix + "szivattyuhaz.zip", job.GetProperty("main").GetString());
+        Assert.Equal("ready", model.GetProperty("status").GetString());
+        Assert.Equal("mesh", model.GetProperty("sourceFormat").GetString());
+        Assert.Equal("szivattyuhaz.zip › Szivattyuhaz/pump.fbx", conversion.GetProperty("source").GetString());
+        Assert.Equal(19.04, model.GetProperty("placement").GetProperty("lon").GetDouble(), 6); // the site point
+        var warnings = conversion.GetProperty("warnings").EnumerateArray().Select(w => w.GetString()).ToList();
+        Assert.Contains("Missing texture(s), shown grey: rust.tga", warnings);
+    }
+
+    [Fact]
     public async Task Mesh_WithMaterialAndTexture_NeedsAPlacement_FailureIsReported()
     {
         var (org, site) = await SiteAsync();

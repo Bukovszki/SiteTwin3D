@@ -5,3 +5,4 @@ boto3==1.43.118
 laspy==2.7.0
 lazrs==0.8.2
 pyproj==3.8.0
+pillow==11.3.0

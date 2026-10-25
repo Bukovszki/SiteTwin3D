@@ -68,6 +68,8 @@ const CONE_LENGTH_M = 8;
           <p-button icon="pi pi-camera" [text]="true" size="small" [pTooltip]="m.panorama.upload" (onClick)="uploadOpen.set(true)" />
         }
         @if (can.anchors()) {
+          <p-button icon="pi pi-map-marker" [text]="true" size="small" [disabled]="selection.nodeId() == null"
+            [pTooltip]="selection.node() ? m.mapPoint.place(selection.node()!.name) : m.mapPoint.needNode" (onClick)="placePoint()" />
           <p-button icon="pi pi-arrows-alt" [text]="!edits.active()" [outlined]="edits.active()" size="small"
             [pTooltip]="edits.active() ? m.anchorEdit.stop : m.anchorEdit.start" (onClick)="edits.toggle()" />
         }
@@ -654,6 +656,26 @@ export class OverviewMap {
         this.layerErrors.update((e) => (e[id] ? { ...e, [id]: text } : e));
       })
       .catch(() => undefined);
+  }
+
+  /**
+   * The selected record's place marked on the floorplan (a point anchor on the shown level, on its floor; outdoor:
+   * none). One point per record: marking again moves it. Needs no model or panorama.
+   */
+  protected placePoint(): void {
+    const node = this.selection.node();
+    if (!node) {
+      this.toasts.add({ severity: 'info', summary: this.m.mapPoint.needNode, life: 3000 });
+      return;
+    }
+    const levelId = this.selection.levelId();
+    this.tools.pickPoint(([lon, lat]) => {
+      this.api.createAnchor(node.id, { kind: 'point', position: { type: 'Point', coordinates: [lon, lat] }, levelId, zRelM: 0 })
+        .subscribe(() => {
+          this.toasts.add({ severity: 'success', summary: this.m.mapPoint.created(node.name), life: 2500 });
+          this.selection.changed();
+        });
+    }, this.m.mapPoint.hint(node.name));
   }
 
   protected toggle(id: number, on: boolean): void {

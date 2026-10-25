@@ -40,8 +40,9 @@ public class ModelConversionQueue
 }
 
 /// <summary>The converter's answer (converter/app.py).</summary>
+/// <param name="Format">The model found in a ZIP (ifc, mesh, pointcloud, glb, 3dtiles); null for a plain upload.</param>
 public record ConversionResult(string Kind, string Key, bool Segmented, string? ElementIdProperty, int? Elements, int? Points, long? SourcePoints,
-    bool? Georeferenced, ConvertedPlacement? Placement, List<string>? Warnings);
+    bool? Georeferenced, ConvertedPlacement? Placement, List<string>? Warnings, string? Format = null, string? Main = null);
 
 /// <param name="AbsoluteHeightM">Height of the origin (e.g. IfcMapConversion.OrthogonalHeight), not yet relative to the site.</param>
 public record ConvertedPlacement(double Lon, double Lat, double AbsoluteHeightM, double HeadingDeg, string? Crs);
@@ -107,6 +108,8 @@ public class ModelConversionService(AppDbContext db, IObjectStorage storage, IHt
         if (!result.Key.StartsWith(folder, StringComparison.Ordinal)) throw new InvalidOperationException("The converter wrote outside the model's folder.");
         asset.Kind = result.Kind;
         asset.StorageKey = result.Key;
+        // A ZIP: from now on the model counts as what was in it (e.g. an IFC stays segmented, its ids editable).
+        if (result.Format is { } inner) asset.SourceFormat = inner;
         asset.Status = ModelStatus.Ready;
         asset.ProcessingError = null;
         if (result.Segmented && result.ElementIdProperty is { } property)
@@ -126,7 +129,7 @@ public class ModelConversionService(AppDbContext db, IObjectStorage storage, IHt
         }
         attrs["conversion"] = new JsonObject
         {
-            ["source"] = job.main[folder.Length..], ["format"] = asset.SourceFormat, ["elements"] = result.Elements, ["points"] = result.Points,
+            ["source"] = result.Main is { } inZip ? $"{job.main[folder.Length..]} › {inZip}" : job.main[folder.Length..], ["format"] = asset.SourceFormat, ["elements"] = result.Elements, ["points"] = result.Points,
             ["source_points"] = result.SourcePoints, ["crs"] = result.Placement?.Crs ?? ModelService.AttrString(asset, "srs"),
             ["warnings"] = new JsonArray(warnings.Select(w => (JsonNode)JsonValue.Create(w)!).ToArray()),
         };

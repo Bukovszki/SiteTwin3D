@@ -209,6 +209,8 @@ export class TreePanel {
   protected readonly creating = signal(false);
   /** Keys of expanded nodes, kept across reloads. */
   protected readonly expanded = new Set<string>();
+  /** An equipment to open the location tree to once it shows (after a reload). */
+  private reveal: number | null = null;
 
   protected readonly aspects = computed(() => [
     { label: this.m.aspects['location'], value: 'location' },
@@ -442,6 +444,16 @@ export class TreePanel {
           this.selection.aspect() === 'location' && node.aspect === 'function'
             ? this.index().byId.get(node.id)
             : undefined;
+        // Equipment not shown yet (e.g. just created under a place): it will be after the reload – stay and open it then.
+        const equipmentComing =
+          !shown &&
+          this.selection.aspect() === 'location' &&
+          node.aspect === 'function' &&
+          !this.functionNodes().some((n) => n.parentId === node.id);
+        if (equipmentComing) {
+          this.reveal = node.id;
+          return;
+        }
         const ancestors = shown ? this.keysAbove(shown) : node.path.split('.').slice(0, -1);
         const closed = ancestors.some((key) => !this.expanded.has(key));
         ancestors.forEach((key) => this.expanded.add(key));
@@ -466,6 +478,13 @@ export class TreePanel {
           if (this.selection.aspect() !== 'location') return;
           this.functionNodes.set(functional);
           this.placements.set(placements);
+          // An equipment waiting to be shown: open the tree down to it under its place.
+          const shown = this.reveal != null ? this.index().byId.get(this.reveal) : undefined;
+          if (shown) {
+            this.reveal = null;
+            this.keysAbove(shown).forEach((key) => this.expanded.add(key));
+            this.nodes.set([...this.nodes()]);
+          }
         },
       );
     if (this.view() === 'data')

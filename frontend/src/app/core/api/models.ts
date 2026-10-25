@@ -361,7 +361,8 @@ export interface ModelAsset {
   tilesetUrl: string;
   /** IFC, mesh formats and point clouds are converted in the background (converting → ready | failed). */
   status: 'ready' | 'converting' | 'failed';
-  sourceFormat: 'ifc' | 'mesh' | 'pointcloud' | null;
+  /** zip until converted, then what was in it (ifc, mesh, pointcloud, glb, 3dtiles). */
+  sourceFormat: 'ifc' | 'mesh' | 'pointcloud' | 'zip' | 'glb' | '3dtiles' | null;
   processingError: string | null;
   /** Point clouds: the source coordinate system (e.g. EPSG:23700). */
   srs: string | null;

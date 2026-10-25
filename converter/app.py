@@ -1,8 +1,9 @@
 """Model converter (spec 9.2): an internal HTTP service of the compose stack, called only by the API.
 
-POST /convert {"format": "ifc" | "mesh" | "pointcloud", "main": key, "keys": [keys of the upload], "outputPrefix": prefix,
-               "srs": "EPSG:23700" | null}
-  → 200 {"kind": "gltf" | "3dtiles", "key": output key, …result of the converter}
+POST /convert {"format": "ifc" | "mesh" | "pointcloud" | "zip", "main": key, "keys": [keys of the upload],
+               "outputPrefix": prefix, "srs": "EPSG:23700" | null}
+  → 200 {"kind": "gltf" | "3dtiles", "key": output key, …result of the converter;
+         a ZIP also "format" (the model found in it) and "main" (its path in the ZIP)}
   → 422 {"error": message} when the file cannot be converted.
 GET /health → 200.
 
@@ -23,6 +24,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import boto3
 from botocore.config import Config
 
+import archive
 import ifc
 import mesh
 import pointcloud
@@ -61,17 +63,18 @@ def run(job: dict) -> dict:
         source = os.path.join(source_root, main[len(base):])
         out = os.path.join(work, "out")
         os.makedirs(out)
-        if kind == "ifc":
-            result = ifc.convert(source, os.path.join(out, "model.glb"))
-            result["key"] = prefix + "model.glb"
-        elif kind == "mesh":
-            result = mesh.convert(source, os.path.join(out, "model.glb"))
-            result["key"] = prefix + "model.glb"
-        elif kind == "pointcloud":
-            result = pointcloud.convert(source, out, job.get("srs"))
-            result["key"] = prefix + "tileset.json"
+        if kind == "zip":
+            # Unpacked with its folders (textures by relative paths); the model in it decides what follows.
+            unpacked = os.path.join(work, "unpacked")
+            os.makedirs(unpacked)
+            archive.extract(source, unpacked)
+            os.remove(source)
+            inner, model = archive.find_model(unpacked)
+            result = convert_one(inner, model, out, prefix, job.get("srs"), unpacked)
+            result["format"] = inner
+            result["main"] = os.path.relpath(model, unpacked).replace(os.sep, "/")
         else:
-            raise ValueError(f"Unknown format: {kind}")
+            result = convert_one(kind, source, out, prefix, job.get("srs"), source_root)
         for folder, _, files in os.walk(out):
             for name in files:
                 path = os.path.join(folder, name)
@@ -81,6 +84,31 @@ def run(job: dict) -> dict:
         return result
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+
+def convert_one(kind: str, source: str, out: str, prefix: str, srs: str | None, upload_root: str) -> dict:
+    """Converts one model into `out`; the result names its output key under `prefix`."""
+    if kind == "ifc":
+        result = ifc.convert(source, os.path.join(out, "model.glb"))
+        result["key"] = prefix + "model.glb"
+    elif kind == "mesh":
+        result = mesh.convert(source, os.path.join(out, "model.glb"), upload_root)
+        result["key"] = prefix + "model.glb"
+    elif kind == "pointcloud":
+        result = pointcloud.convert(source, out, srs)
+        result["key"] = prefix + "tileset.json"
+    elif kind == "glb":
+        # A GLB in a ZIP: shown as it is (placed like any GLB).
+        shutil.copyfile(source, os.path.join(out, "model.glb"))
+        result = {"kind": "gltf", "segmented": False, "placement": None, "warnings": [], "key": prefix + "model.glb"}
+    elif kind == "3dtiles":
+        # A ready 3D Tiles package in a ZIP: its folder as it is (georeferenced by its root transform).
+        shutil.copytree(os.path.dirname(source), out, dirs_exist_ok=True)
+        result = {"kind": "3dtiles", "segmented": False, "georeferenced": True, "placement": None, "warnings": [],
+                  "key": prefix + "tileset.json"}
+    else:
+        raise ValueError(f"Unknown format: {kind}")
+    return result
 
 
 class Handler(BaseHTTPRequestHandler):

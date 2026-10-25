@@ -101,10 +101,11 @@ A válasz tartalma:
 
 ## 4b. Modellátalakítás
 
-A feltöltött IFC-, mesh- és pontfelhőfájlokat a `converter` szolgáltatás alakítja át, egyszerre egyet; a modellek listájában az állapot „Átalakítás…”, majd „Kész” vagy „Hiba” (az ok a sor fölé víve látszik).
+A feltöltött IFC-, mesh- és pontfelhőfájlokat – és a ZIP-be csomagolt modelleket (pl. FBX a textúráival) – a `converter` szolgáltatás alakítja át, egyszerre egyet; a modellek listájában az állapot „Átalakítás…”, majd „Kész” vagy „Hiba” (az ok a sor fölé víve látszik).
 
 - Memória: `CONVERTER_MEMORY` (alapból 4g). Nagy IFC vagy pontfelhő esetén növelje; a pontfelhő legfeljebb `CONVERTER_MAX_POINTS` pontot tart meg (alapból 30 millió, a többit egyenletesen ritkítja, és ezt jelzi).
 - Időkorlát: 120 perc átalakításonként (`Converter__TimeoutMinutes`); ha a konverter nem érhető el, az API ötször próbálkozik, utána „Hiba”.
+- ZIP: a mappaszerkezettel bontja ki, legfeljebb `CONVERTER_MAX_UNPACKED_MB` méretig (alapból 20 GB); a mesh modellek külső textúrái a modellbe kerülnek (a böngésző által nem ismert formátumok PNG-ként), a hiányzók szürkén, figyelmeztetéssel.
 - Napló: `docker compose logs converter`.
 
 ## 5. Naplók

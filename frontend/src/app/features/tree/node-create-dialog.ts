@@ -23,8 +23,22 @@ import { SchemaForm } from '../datasheet/schema-form';
         </div>
         <div class="field">
           <label for="new-type">{{ m.node.type }}</label>
-          <p-select inputId="new-type" name="type" [options]="types()" optionLabel="name" optionValue="id" [ngModel]="typeId()" (ngModelChange)="typeId.set($event); attrs = {}" fluid />
+          @if (placeHere()) {
+            <!-- Under a place: its own children, or equipment that gets this place (one record, both trees). -->
+            <p-select inputId="new-type" name="type" [options]="typeGroups()" [group]="true" optionGroupLabel="label" optionGroupChildren="items"
+              optionLabel="name" optionValue="id" [ngModel]="typeId()" (ngModelChange)="typeId.set($event); attrs = {}" fluid />
+          } @else {
+            <p-select inputId="new-type" name="type" [options]="types()" optionLabel="name" optionValue="id" [ngModel]="typeId()" (ngModelChange)="typeId.set($event); attrs = {}" fluid />
+          }
         </div>
+        @if (placing()) {
+          <div class="field">
+            <label for="new-function-parent">{{ m.node.functionParent }}</label>
+            <p-select inputId="new-function-parent" name="functionParent" [options]="functionParents()" optionLabel="label" optionValue="value"
+              [(ngModel)]="functionParentId" [filter]="true" filterBy="label" appendTo="body" fluid />
+            <small class="muted">{{ m.node.placedHint(parent()!.name) }}</small>
+          </div>
+        }
         <div class="row">
           <div class="field">
             <label for="new-name">{{ m.node.name }}</label>
@@ -76,6 +90,24 @@ export class NodeCreateDialog {
 
   /** Types of the current tree (aspect). */
   protected readonly types = computed(() => this.selection.nodeTypes().filter((t) => t.aspect === this.selection.aspect()));
+  /** A place selected in the location tree: equipment (functional types) can be created right under it. */
+  protected readonly placeHere = computed(() => this.selection.aspect() === 'location' && this.parent()?.aspect === 'location');
+  protected readonly typeGroups = computed(() => [
+    { label: this.m.node.locationTypes, items: this.types() },
+    { label: this.m.node.equipmentHere(this.parent()?.name ?? ''), items: this.selection.nodeTypes().filter((t) => t.aspect === 'function') },
+  ]);
+  /** A functional type under a place: created in the functional tree, its place (located_in) is the selected one. */
+  protected readonly placing = computed(() => this.placeHere() && this.selection.typeOf(this.typeId())?.aspect === 'function');
+  private readonly functionNodes = signal<Node[]>([]);
+  protected readonly functionParents = computed(() => {
+    const byId = new Map(this.functionNodes().map((n) => [n.id, n]));
+    const path = (n: Node): string => (n.parentId != null && byId.has(n.parentId) ? `${path(byId.get(n.parentId)!)} › ` : '') + n.name;
+    return [
+      { label: this.m.node.root, value: null as number | null },
+      ...this.functionNodes().map((n) => ({ label: path(n), value: n.id as number | null })).sort((a, b) => a.label.localeCompare(b.label, 'hu')),
+    ];
+  });
+  protected functionParentId: number | null = null;
   protected readonly schema = computed(() => this.selection.typeOf(this.typeId())?.attrSchema ?? null);
 
   /** Required attributes of the type not filled in (e.g. a level's floor elevation): the server would refuse it. */
@@ -86,6 +118,9 @@ export class NodeCreateDialog {
 
   protected reset(): void {
     this.typeId.set(null);
+    this.functionParentId = null;
+    const siteId = this.selection.siteId();
+    if (this.placeHere() && siteId != null) this.api.tree(siteId, 'function').subscribe((nodes) => this.functionNodes.set(nodes));
     this.name = '';
     this.code = '';
     this.attrs = {};
@@ -96,14 +131,19 @@ export class NodeCreateDialog {
     const typeId = this.typeId();
     if (siteId == null || typeId == null) return;
     this.saving.set(true);
+    const place = this.placing() ? this.parent() : null;
+    const done = (node: Node) => {
+      this.saving.set(false);
+      this.visible.set(false);
+      this.created.emit(node);
+    };
+    const parentId = place ? this.functionParentId : (this.parent()?.id ?? null);
     this.api
-      .createNode({ siteId, parentId: this.parent()?.id ?? null, typeId, name: this.name.trim(), code: this.code.trim() || null, attrs: this.attrs })
+      .createNode({ siteId, parentId, typeId, name: this.name.trim(), code: this.code.trim() || null, attrs: this.attrs })
       .subscribe({
-        next: (node) => {
-          this.saving.set(false);
-          this.visible.set(false);
-          this.created.emit(node);
-        },
+        // Equipment created under a place: that place is its location (located_in).
+        next: (node) =>
+          place ? this.api.setLocation(node.id, place.id).subscribe({ next: () => done(node), error: () => done(node) }) : done(node),
         error: () => this.saving.set(false),
       });
   }

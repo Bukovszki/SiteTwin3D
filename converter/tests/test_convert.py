@@ -2,6 +2,8 @@
 
 IFC: a wall and a pump, georeferenced in EOV → segmented GLB with GlobalIds, placement computed.
 OBJ with MTL → GLB. LAS (100 000 coloured points) → octree of .pnts tiles, local and in EOV → ECEF.
+ZIP: an OBJ with a TGA texture in a sub-folder, and an FBX with its texture → GLB with the textures inside (PNG);
+an unsafe ZIP (path leaving the folder) is refused.
 """
 
 from __future__ import annotations
@@ -10,10 +12,16 @@ import json
 import math
 import os
 import struct
+import subprocess
 import tempfile
+import zipfile
 
 import numpy as np
 
+from PIL import Image
+
+import app
+import archive
 import ifc
 import mesh
 import pointcloud
@@ -109,6 +117,84 @@ def test_obj(work: str) -> None:
     print("obj ok: MTL colour kept")
 
 
+def textured_cube(folder: str, texture: str) -> str:
+    """An OBJ cube with UVs whose MTL points to `texture` (relative path, its case differing from the file's)."""
+    os.makedirs(os.path.join(folder, os.path.dirname(texture)), exist_ok=True)
+    Image.new("RGB", (8, 8), (200, 40, 40)).save(os.path.join(folder, texture), "TGA")
+    with open(os.path.join(folder, "cube.mtl"), "w") as m:
+        m.write(f"newmtl red\nKd 1 1 1\nmap_Kd {texture.upper().replace('.TGA', '.tga')}\n")
+    obj = os.path.join(folder, "cube.obj")
+    with open(obj, "w") as f:
+        f.write("mtllib cube.mtl\nusemtl red\n" + "".join(f"v {x} {y} {z}\n" for x in (0, 1) for y in (0, 1) for z in (0, 1)))
+        f.write("vt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\n")
+        f.write("f 1/1 3/2 4/3 2/4\nf 5/1 6/2 8/3 7/4\nf 1/1 2/2 6/3 5/4\nf 3/1 7/2 8/3 4/4\nf 1/1 5/2 7/3 3/4\nf 2/1 4/2 8/3 6/4\n")
+    return obj
+
+
+def zip_folder(folder: str, path: str) -> None:
+    with zipfile.ZipFile(path, "w") as z:
+        for directory, _, files in os.walk(folder):
+            for name in files:
+                full = os.path.join(directory, name)
+                z.write(full, os.path.relpath(full, folder))
+
+
+def embedded_images(glb: str) -> list[str]:
+    gltf, _ = read_glb(glb)
+    images = gltf.get("images", [])
+    assert all("uri" not in i and "bufferView" in i for i in images), images
+    return [i["mimeType"] for i in images]
+
+
+def convert_zip(work: str, name: str) -> dict:
+    out = os.path.join(work, f"{name}-out")
+    unpacked = os.path.join(work, f"{name}-unpacked")
+    os.makedirs(out)
+    os.makedirs(unpacked)
+    archive.extract(os.path.join(work, f"{name}.zip"), unpacked)
+    inner, model = archive.find_model(unpacked)
+    result = app.convert_one(inner, model, out, "org/1/models/x/converted/", None, unpacked)
+    result["format"] = inner
+    result["glb"] = os.path.join(out, "model.glb")
+    return result
+
+
+def test_zip(work: str) -> None:
+    # OBJ + MTL + TGA texture in a sub-folder (MTL names it in another case): the texture goes into the GLB as PNG.
+    source = os.path.join(work, "zip-obj", "Model")
+    textured_cube(source, "textures/wall.tga")
+    zip_folder(os.path.dirname(source), os.path.join(work, "objzip.zip"))
+    result = convert_zip(work, "objzip")
+    assert result["format"] == "mesh" and result["kind"] == "gltf", result
+    assert embedded_images(result["glb"]) == ["image/png"], result
+    assert not any("Missing texture" in w for w in result["warnings"]), result["warnings"]
+
+    # FBX (exported by Assimp from the cube) with its texture next to it in another folder of the ZIP.
+    fbx_source = os.path.join(work, "fbx-src")
+    obj = textured_cube(fbx_source, "maps/wall.tga")
+    fbx_folder = os.path.join(work, "zip-fbx")
+    os.makedirs(os.path.join(fbx_folder, "maps"))
+    subprocess.run(["assimp", "export", obj, os.path.join(fbx_folder, "pump.fbx"), "-ffbx"], check=True, capture_output=True)
+    Image.new("RGB", (8, 8), (200, 40, 40)).save(os.path.join(fbx_folder, "maps", "wall.tga"), "TGA")
+    zip_folder(fbx_folder, os.path.join(work, "fbxzip.zip"))
+    result = convert_zip(work, "fbxzip")
+    images = embedded_images(result["glb"])
+    assert result["format"] == "mesh" and result["kind"] == "gltf", result
+    print(f"zip ok: OBJ texture embedded as PNG; FBX converted, {len(images)} texture(s) embedded {images}, warnings {result['warnings']}")
+
+    # A path leaving the folder is refused.
+    evil = os.path.join(work, "evil.zip")
+    with zipfile.ZipFile(evil, "w") as z:
+        z.writestr("../outside.txt", "x")
+        z.writestr("model.obj", "v 0 0 0\n")
+    try:
+        archive.extract(evil, os.path.join(work, "evil-unpacked"))
+        raise AssertionError("unsafe ZIP accepted")
+    except ValueError as e:
+        assert "Unsafe path" in str(e), e
+    print("zip ok: unsafe path refused")
+
+
 def test_pointcloud(work: str) -> None:
     import laspy
 
@@ -164,6 +250,7 @@ if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as work:
         test_ifc(work)
         test_obj(work)
+        test_zip(work)
         test_pointcloud(work)
         test_e57(work)
     print("all converter tests passed")

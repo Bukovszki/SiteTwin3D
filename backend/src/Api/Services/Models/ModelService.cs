@@ -36,6 +36,8 @@ public static class ModelFormats
     public const string Ifc = "ifc";
     public const string Mesh = "mesh";
     public const string PointCloud = "pointcloud";
+    /// <summary>A ZIP of a model with its files (e.g. FBX with textures in folders): the converter unpacks it and finds the model.</summary>
+    public const string Archive = "zip";
 
     /// <summary>Mesh formats of the converter (Assimp); a .gltf with its .bin and textures is converted to one GLB.</summary>
     public static readonly string[] MeshExtensions = [".obj", ".fbx", ".dae", ".stl", ".ply", ".3ds", ".x3d", ".off", ".gltf"];
@@ -48,6 +50,7 @@ public static class ModelFormats
     {
         if (paths.Contains(ModelService.TilesetFile)) return (Tileset, ModelService.TilesetFile);
         string Ext(string p) => Path.GetExtension(p).ToLowerInvariant();
+        if (paths.Count == 1 && Ext(paths.First()) == ".zip") return (Archive, paths.First());
         var mains = paths.Where(p => Ext(p) is ".glb" or ".ifc" || MeshExtensions.Contains(Ext(p)) || PointCloudExtensions.Contains(Ext(p))).ToList();
         if (mains.Count != 1) return null;
         var main = mains[0];
@@ -143,17 +146,18 @@ public partial class ModelService(AppDbContext db, IObjectStorage storage, Curre
         var asset = new ModelAsset { SiteId = siteId, NodeId = request.NodeId };
         var attrs = new JsonObject { ["name"] = request.Name.Trim() };
         var detected = ModelFormats.Detect(keys.Select(k => k[prefix.Length..]).ToList());
-        if (detected is { Format: ModelFormats.Ifc or ModelFormats.Mesh or ModelFormats.PointCloud } source)
+        if (detected is { Format: ModelFormats.Ifc or ModelFormats.Mesh or ModelFormats.PointCloud or ModelFormats.Archive } source)
         {
             // Converted in the background (spec 9.2); the model shows once it is ready.
             asset.Status = ModelStatus.Converting;
             asset.SourceFormat = source.Format;
+            // A ZIP's model is known after unpacking; the converter's answer sets the kind and the format.
             asset.Kind = source.Format == ModelFormats.PointCloud ? "3dtiles" : "gltf";
             asset.StorageKey = prefix + source.Main;
             if (source.Format == ModelFormats.Mesh && request.Placement is null)
                 throw AppException.BadRequest("model.placement_required", "A mesh has no georeference: placement (lon, lat, heightM, headingDeg) is required.");
             if (request.Placement is { } p) attrs["placement"] = PlacementNode(p);
-            if (source.Format == ModelFormats.PointCloud && !string.IsNullOrWhiteSpace(request.Srs))
+            if (source.Format is ModelFormats.PointCloud or ModelFormats.Archive && !string.IsNullOrWhiteSpace(request.Srs))
             {
                 var srs = request.Srs.Trim().ToUpperInvariant();
                 if (!EpsgRegex().IsMatch(srs)) throw AppException.BadRequest("model.invalid_srs", "srs: EPSG:<code>, e.g. EPSG:23700.");
