@@ -483,6 +483,18 @@ export const MESSAGES_HU = {
     converting: 'Egy modell átalakítása folyamatban – kész állapotban magától megjelenik.',
     flyTo: 'Ugrás a modellre',
     noGround: 'Alaptérkép nélkül',
+    nav: {
+      zoomIn: 'Közelítés',
+      zoomOut: 'Távolítás',
+      left: 'Forgatás balra (a középen lévő pont körül)',
+      right: 'Forgatás jobbra (a középen lévő pont körül)',
+      up: 'Felülről nézni (döntés felfelé)',
+      down: 'Oldalról nézni (döntés lefelé)',
+      top: 'Felülnézet',
+      north: 'Észak felfelé',
+    } as Record<string, string>,
+    mouseHelp:
+      'Egér: bal gomb húzás – mozgatás; jobb gomb húzás vagy görgő – közelítés/távolítás; középső gomb vagy Ctrl + bal gomb húzás – forgatás és döntés.',
     groundHint: 'Alaptérkép a modell alatt, a telephely alapmagasságában (a Web Mercator vagy WGS84 háttérrétegek közül; az EOV-ban szolgáltatott réteg csak a térképen látszik).',
     loadFailed: (name: string) => `A(z) „${name}” modell nem tölthető be.`,
     levelHint: 'Szint kiválasztásakor a modell a szint mennyezete felett le van vágva.',

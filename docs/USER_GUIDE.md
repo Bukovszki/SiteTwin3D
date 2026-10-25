@@ -289,6 +289,8 @@ A kijelölt elem **befoglaló doboza** a panorámán is megjelenik; ha eltakarja
 
 - **Szint kiválasztása** (a 3D eszköztár bal szélén): a modell a szint mennyezete felett le van vágva – belelát az épületbe. *Teljes modell*: vágás nélkül.
 - **Ugrás a modellre** (ház ikon): vissza az áttekintéshez.
+- **Navigáció** (gombsor a 3D nézet jobb alsó sarkában): közelítés / távolítás, forgatás balra / jobbra és döntés a kép közepén lévő pont körül, **felülnézet**, **észak felfelé**; a ? gomb az egérhasználatot mutatja (bal gomb húzás – mozgatás, jobb gomb vagy görgő – közelítés, középső gomb vagy Ctrl + bal gomb – forgatás és döntés).
+- **Panorámák a 3D-ben**: a felvételi helyükön, a kamera magasságában kamera jel mutatja őket (a megnyitott nagyobb, gyűrűvel); rákattintva a panoráma a 3D mellett nyílik meg. Szint kiválasztásakor csak az adott szint panorámái látszanak.
 - **Alaptérkép** (a ház ikon melletti lista): a háttérréteg (pl. OpenStreetMap) laposan, a modell alatt, a telephely alapmagasságában – kiterített térképként, nem földgömbön. Alapból a térképen is alapból látszó réteg; *Alaptérkép nélkül* kikapcsolja. Csak Web Mercator vagy WGS84 vetületű réteg tehető alá; az EOV-ban szolgáltatott réteg csak a 2D térképen látszik.
 - Egy **technológiai vonal** kijelölésekor minden berendezése egyszerre kiemelődik – épületeken és szinteken át; *Teljes modell* nézetben a modell áttetszővé válik, a kiemelt elemek a falakon át is látszanak.
 

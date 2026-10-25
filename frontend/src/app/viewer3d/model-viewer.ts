@@ -56,7 +56,7 @@ import { Message } from 'primeng/message';
 import { Select } from 'primeng/select';
 import { Tooltip } from 'primeng/tooltip';
 import { ApiService } from '../core/api/api.service';
-import { Anchor, GeoJsonGeometry, LevelInfo, MapLayer, ModelAsset, Place } from '../core/api/models';
+import { Anchor, GeoJsonGeometry, LevelInfo, MapLayer, ModelAsset, Panorama, Place } from '../core/api/models';
 import { LocalPlane, SnapIndex, SnapResult } from '../core/geo/snap';
 import { Permissions } from '../core/auth/permissions';
 import { MESSAGES } from '../core/i18n/messages';
@@ -71,7 +71,8 @@ import {
   smallestContaining,
 } from './box-math';
 import { handleAxis, handleCursor, handleIcon } from './handle-icons';
-import { PIN, placeIcon } from '../core/markers/marker-icons';
+import { PIN, panoramaIcon, panoramaIconSize, panoramaState, placeIcon } from '../core/markers/marker-icons';
+import { NavAction, navigate } from './navigation';
 import { GroundMap, groundable } from './ground-map';
 import { ModelsDialog } from './models-dialog';
 import { BoxImportDialog } from '../features/import/box-import-dialog';
@@ -118,6 +119,17 @@ type Tool = 'box' | 'point' | 'element';
   ],
   template: `
     <div #container class="scene" [class.placing]="tool() != null"></div>
+    @if (!error()) {
+      <!-- Navigation (user request): zoom, turn around and tilt over the point in the middle, view from above, north up. -->
+      <div class="nav">
+        @for (b of navButtons; track b.action) {
+          <p-button [icon]="b.icon" [text]="true" size="small" severity="secondary" [pTooltip]="m.viewer3d.nav[b.action]"
+            tooltipPosition="left" [ariaLabel]="m.viewer3d.nav[b.action]" (onClick)="nav(b.action)" />
+        }
+        <p-button icon="pi pi-question-circle" [text]="true" size="small" severity="secondary" [pTooltip]="m.viewer3d.mouseHelp"
+          tooltipPosition="left" [ariaLabel]="m.viewer3d.mouseHelp" />
+      </div>
+    }
     @if (error()) {
       <p class="error" role="alert">{{ error() }}</p>
     } @else {
@@ -332,10 +344,25 @@ type Tool = 'box' | 'point' | 'element';
         cursor: crosshair;
       }
     }
+    .nav {
+      position: absolute;
+      right: 0.5rem;
+      bottom: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      padding: 0.15rem;
+      background: var(--p-content-background);
+      border: 1px solid var(--p-content-border-color);
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgb(0 0 0 / 0.1);
+    }
     .toolbar {
       position: absolute;
       top: 0.5rem;
       left: 0.5rem;
+      /* A narrow view (next to an open panorama): the tools wrap instead of running off the edge. */
+      max-width: calc(100% - 1rem);
+      flex-wrap: wrap;
       display: flex;
       align-items: center;
       gap: 0.25rem;
@@ -429,6 +456,18 @@ export class ModelViewer {
   /** One place per node; those only with a point or info-point place get a marker here (boxes and elements show themselves). */
   protected readonly places = signal<Place[]>([]);
   protected readonly snapTolerance = signal(DEFAULT_SNAP_M);
+  /** The site's panoramas: a camera mark where each was taken (user report: not seen in the model). */
+  private readonly panoramas = signal<Panorama[]>([]);
+  protected readonly navButtons: { action: NavAction; icon: string }[] = [
+    { action: 'zoomIn', icon: 'pi pi-plus' },
+    { action: 'zoomOut', icon: 'pi pi-minus' },
+    { action: 'left', icon: 'pi pi-replay' },
+    { action: 'right', icon: 'pi pi-refresh' },
+    { action: 'up', icon: 'pi pi-angle-double-up' },
+    { action: 'down', icon: 'pi pi-angle-double-down' },
+    { action: 'top', icon: 'pi pi-arrow-circle-down' },
+    { action: 'north', icon: 'pi pi-compass' },
+  ];
   /** Background layers of the site; the one laid under the model (null: none). */
   private readonly mapLayers = signal<MapLayer[]>([]);
   protected readonly groundLayerId = signal<number | null>(null);
@@ -521,6 +560,8 @@ export class ModelViewer {
       this.selection.highlightIds();
       this.boxes();
       this.places();
+      this.panoramas();
+      this.selection.panoramaId();
       this.xray();
       untracked(() => this.drawBoxes());
     });
@@ -638,6 +679,7 @@ export class ModelViewer {
       this.boxes.set([]);
       this.elements.set([]);
       this.places.set([]);
+      this.panoramas.set([]);
       this.showModels([]);
       return;
     }
@@ -653,6 +695,7 @@ export class ModelViewer {
       .siteAnchors(siteId, 'model_feature')
       .subscribe((elements) => this.elements.set(elements));
     this.api.places(siteId, null, true).subscribe((places) => this.places.set(places));
+    this.api.sitePanoramas(siteId).subscribe((panoramas) => this.panoramas.set(panoramas));
     this.api.siteAnchors(siteId, 'region').subscribe((boxes) => {
       this.boxes.set(boxes);
       const editing = this.editing();
@@ -1179,7 +1222,34 @@ export class ModelViewer {
         }),
       );
     }
+    // Panoramas: where the camera stood (level floor + camera height); a click opens it.
+    for (const p of this.panoramas()) {
+      if ((level != null && p.levelId !== level) || !site) continue;
+      const open = this.selection.panoramaId() === p.id;
+      const size = panoramaIconSize(open);
+      const [lon, lat] = p.position.coordinates;
+      this.viewer.entities.add(
+        new Entity({
+          id: `pano:${p.id}`,
+          position: Cartesian3.fromDegrees(lon, lat, site.baseHeightM + this.levelElevation(p.levelId) + p.zRelM),
+          billboard: {
+            image: panoramaIcon(panoramaState(p.privacyStatus), open),
+            width: size,
+            height: size,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+        }),
+      );
+    }
     if (editing) this.drawEditor();
+  }
+
+  protected nav(action: NavAction): void {
+    const site = this.selection.site();
+    if (!this.viewer || !site) return;
+    const [lon, lat] = site.refPoint.coordinates;
+    const level = this.levels().find((l) => l.id === this.selection.levelId());
+    navigate(this.viewer, action, Cartesian3.fromDegrees(lon, lat, site.baseHeightM + (level?.elevationM ?? 0)));
   }
 
   private volumeInstance(box: BoxDraft, selected: boolean): GeometryInstance {
@@ -1373,6 +1443,11 @@ export class ModelViewer {
   private click(position: Cartesian2): void {
     if (!this.viewer || this.dragged || this.pickedHandle(position)) return;
     const marker = this.pickedEntityId(position);
+    if (marker?.startsWith('pano:') && !this.tool()) {
+      // The panorama opens beside the 3D view (the 3D stays).
+      this.selection.openPanorama(Number(marker.slice(5)));
+      return;
+    }
     if (marker?.startsWith('place:') && !this.tool()) {
       const nodeId = Number(marker.slice(6));
       this.stopEditing();
