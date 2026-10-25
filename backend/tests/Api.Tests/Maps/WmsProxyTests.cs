@@ -45,6 +45,27 @@ public sealed class WmsProxyTests(PostgisFixture postgis) : ApiTestBase(postgis)
     }
 
     [Fact]
+    public async Task ExternalWms_ErrorMessageInsteadOfAMap_IsReportedWithItsText()
+    {
+        var org = await Api.NewOrganizationAsync();
+        var id = await CreateLayerAsync(org, new { source = "external_wms", name = "EOV", layer = "osm", externalUrl = "https://wms.example.hu/geoserver/wms" });
+        Factory.GeoServer.WmsAnswer = _ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                "<?xml version=\"1.0\"?><ServiceExceptionReport version=\"1.3.0\"><ServiceException code=\"InvalidCRS\">\n" +
+                "  Error occurred decoding the espg code EPSG:3857</ServiceException></ServiceExceptionReport>",
+                System.Text.Encoding.UTF8, "application/vnd.ogc.se_xml"),
+        };
+
+        var response = await org.Http.GetAsync($"/api/v1/maps/wms?mapLayerId={id}&{GetMap}");
+        var problem = await TestApi.ReadJson(response);
+
+        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+        Assert.Equal("maps.wms_error", problem.GetProperty("code").GetString());
+        Assert.Contains("Error occurred decoding the espg code EPSG:3857", problem.GetProperty("detail").GetString());
+    }
+
+    [Fact]
     public async Task MapManagerLayer_GoesWithServiceToken()
     {
         var org = await Api.NewOrganizationAsync();

@@ -118,6 +118,8 @@ Az alaprajzot nem itt kell feltölteni: a MapManagerben publikált rétegre hiva
 2. **Alaprajzok kezelése** (képek ikon) → név (*Építészet*), forrás (*MapManager*), réteg (pl. `ceg:alaprajz`), szintszűrő (pl. `szint = 'F0'`) → **Új**.
 3. Az alaprajz megjelenik a térképen; ez lesz a panorámák és a pontok elhelyezésének alapja.
 
+**Háttérrétegek (pl. ortofotó, közmű, OSM):** fejléc → **Háttérrétegek** (szervezeti admin) → név, forrás (*Külső WMS* vagy *MapManager*), réteg (`munkaterület:réteg`), cím, **Vetület**, hatókör → **Új**. Ha a szolgáltatás csak EOV-ban ad képet (pl. EOV-ban gyorsítótárazott réteg), a vetület legyen *EOV (EPSG:23700)*: a térkép EOV-ban kéri le, és maga vetíti át. Egy réteg adatai a ceruza gombbal utólag is módosíthatók. Ha egy réteg nem tölthető be, a térkép jobb felső sarkában a neve narancssárga figyelmeztetést kap; a jel fölé víve látszik az ok.
+
 ### 4. Funkcionális szerkezet és műszaki adatok
 
 *Előkészítés mód.*

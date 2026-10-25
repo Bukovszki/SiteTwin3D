@@ -50,6 +50,7 @@ docs/        ← SPECIFICATION.md, MAPMANAGER_EXTENSIONS.md, OPERATIONS.md (üze
 - Rajzi rétegek: szerkesztés EPSG:3857-ben, tárolás WGS84-ben (`Services/Drawing/WebMercator.cs`, pontos képlet); egy rekordhoz itt egy geometria tartozik.
 - Cesium-panoráma tájolása: `IMAGE_HEADING_OFFSET = -90` (mérés: `frontend/src/app/features/panorama/README.md`; Cesium-frissítés után ellenőrizni).
 - A szintvágás a Cesium típusdefiníciókból hiányzó `Cesium3DTileset.clippingPlanesOriginMatrix` getterre épül (`viewer3d/model-viewer.ts`); Cesium-frissítés után ellenőrizni. Egy `ClassificationPrimitive` csak egyszínű példányokat fogad: színenként külön primitív. A tileset `clippingPlanes`-ét **ne** cseréld (a régi megsemmisül, miközben a csempék még rajzolnak vele → „reading '_target'” renderhiba): tilesetenként egy gyűjtemény, csak a `modelMatrix` és az `enabled` változik.
+- Külső WMS más vetületben: `wmsParams.CRS` (pl. EPSG:23700) → a térkép abban kéri, OpenLayers újravetít (`core/geo/projections.ts`, proj4 – új vetületnél ott kell regisztrálni). A proxy (`Services/Maps/WmsProxy`) a kép helyett jött WMS-hibaüzenetet `maps.wms_error`-ként adja vissza.
 - MapManager-kötés: a WFS-t a backend hívja (`Services/Maps/MapManagerClient`), a CQL-t szerveroldalon, a réteg mezőlistájával ellenőrizve építi; a kliens nem kap nyers WFS-proxyt. A token konfigurációból: `MapManager:Tokens:<organization.mapmanager_token_ref>`.
 
 ## Megszeghetetlen szabályok

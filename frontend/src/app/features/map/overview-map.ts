@@ -30,6 +30,7 @@ import { PanoramaUploadDialog } from '../panorama/panorama-upload-dialog';
 import { FloorplansDialog } from './floorplans-dialog';
 import { MapLegend } from './map-legend';
 import { Permissions } from '../../core/auth/permissions';
+import { layerProjection } from '../../core/geo/projections';
 import { MESSAGES } from '../../core/i18n/messages';
 import { PIN, panoramaIcon, panoramaState, placeIcon, siteIcon } from '../../core/markers/marker-icons';
 import { SelectionService } from '../../core/selection/selection.service';
@@ -80,9 +81,12 @@ const CONE_LENGTH_M = 8;
     @if (layers().length > 0) {
       <div class="layer-switcher">
         @for (layer of layers(); track layer.id) {
-          <label>
+          <label [class.failed]="layerErrors()[layer.id]">
             <p-checkbox [binary]="true" [ngModel]="visible()[layer.id]" (ngModelChange)="toggle(layer.id, $event)" />
             {{ layer.name }}
+            @if (layerErrors()[layer.id]; as error) {
+              <i class="pi pi-exclamation-triangle" [pTooltip]="error" tooltipPosition="left"></i>
+            }
           </label>
         }
       </div>
@@ -124,6 +128,9 @@ const CONE_LENGTH_M = 8;
         align-items: center;
         gap: 0.4rem;
         font-size: 0.85rem;
+        &.failed {
+          color: var(--p-orange-600);
+        }
       }
     }
     .level-bar {
@@ -294,7 +301,7 @@ export class OverviewMap {
         if (this.selection.levelId() !== levelId) return;
         floorplans.forEach((f, i) => {
           const layer = new ImageLayer({
-            source: new ImageWMS({ url: floorplanWmsUrl(f.id), params: { LAYERS: f.layer }, ratio: 1 }),
+            source: new ImageWMS({ url: floorplanWmsUrl(f.id), params: { LAYERS: f.layer }, ratio: 1, projection: layerProjection(f.wmsParams) }),
             opacity: f.opacity,
             zIndex: 50 + i,
           });
@@ -618,13 +625,35 @@ export class OverviewMap {
 
   private addBackground(layer: MapLayer): void {
     const index = this.layers().indexOf(layer);
+    // A layer served only in another system (e.g. EOV) is asked for in it and reprojected here (its wmsParams.CRS).
+    const source = new ImageWMS({ url: wmsProxyUrl(layer.id), params: { LAYERS: layer.layer }, ratio: 1, projection: layerProjection(layer.wmsParams) });
+    source.on('imageloaderror', (event) => this.layerFailed(layer.id, (event.image.getImage() as HTMLImageElement).src));
+    source.on('imageloadend', () => this.layerErrors.update(({ [layer.id]: _, ...rest }) => rest));
     const image = new ImageLayer({
-      source: new ImageWMS({ url: wmsProxyUrl(layer.id), params: { LAYERS: layer.layer }, ratio: 1 }),
+      source,
       visible: this.visible()[layer.id] ?? layer.visibleDefault,
       zIndex: index,
     });
     this.backgroundLayers.set(layer.id, image);
     this.map!.addLayer(image);
+  }
+
+  /** Why a background layer shows nothing (its last image failed): asked from the proxy once, shown in the switcher. */
+  protected readonly layerErrors = signal<Record<number, string>>({});
+
+  private layerFailed(id: number, url: string): void {
+    if (this.layerErrors()[id]) return;
+    this.layerErrors.update((e) => ({ ...e, [id]: this.m.mapLayers.failed }));
+    fetch(url)
+      .then((r) => (r.ok ? null : r.json()))
+      .then((problem: { code?: string; detail?: string } | null) => {
+        if (!problem?.code) return;
+        // The service's own message (e.g. an unsupported coordinate system) after the colon of the API's detail.
+        const own = problem.code === 'maps.wms_error' ? problem.detail?.split(': ').slice(1).join(': ') : '';
+        const text = `${this.m.errors[problem.code] ?? this.m.mapLayers.failed}${own ? ` – ${own}` : ''}`;
+        this.layerErrors.update((e) => (e[id] ? { ...e, [id]: text } : e));
+      })
+      .catch(() => undefined);
   }
 
   protected toggle(id: number, on: boolean): void {

@@ -1,5 +1,6 @@
 import { Component, computed, inject, model, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { MessageService } from 'primeng/api';
 import { Button } from 'primeng/button';
 import { Checkbox } from 'primeng/checkbox';
 import { Dialog } from 'primeng/dialog';
@@ -19,11 +20,23 @@ import { SelectionService } from '../../core/selection/selection.service';
   selector: 'app-map-layers-dialog',
   imports: [FormsModule, Dialog, Button, InputText, Select, Checkbox, TableModule],
   template: `
-    <p-dialog [header]="m.mapLayers.title" [(visible)]="visible" [modal]="true" [style]="{ width: '40rem' }" (onShow)="load()">
+    <p-dialog
+      [header]="m.mapLayers.title"
+      [(visible)]="visible"
+      [modal]="true"
+      [style]="{ width: '46rem' }"
+      (onShow)="load()"
+    >
       <small class="muted">{{ m.mapLayers.hint }}</small>
       <p-table [value]="layers()" size="small" styleClass="list">
         <ng-template #header>
-          <tr><th>{{ m.mapLayers.name }}</th><th>{{ m.mapLayers.source }}</th><th>{{ m.mapLayers.layer }}</th><th>{{ m.mapLayers.scope }}</th><th></th></tr>
+          <tr>
+            <th>{{ m.mapLayers.name }}</th>
+            <th>{{ m.mapLayers.source }}</th>
+            <th>{{ m.mapLayers.layer }}</th>
+            <th>{{ m.mapLayers.scope }}</th>
+            <th></th>
+          </tr>
         </ng-template>
         <ng-template #body let-l>
           <tr>
@@ -31,11 +44,28 @@ import { SelectionService } from '../../core/selection/selection.service';
             <td>{{ m.mapLayers.sources[l.source] }}</td>
             <td>{{ l.layer }}</td>
             <td>{{ l.siteId ? m.mapLayers.thisSite : m.mapLayers.allSites }}</td>
-            <td><p-button icon="pi pi-trash" severity="danger" [text]="true" size="small" [ariaLabel]="m.common.delete" (onClick)="remove(l)" /></td>
+            <td class="row-actions">
+              <p-button
+                icon="pi pi-pencil"
+                [text]="true"
+                size="small"
+                [ariaLabel]="m.mapLayers.edit"
+                (onClick)="edit(l)"
+              />
+              <p-button
+                icon="pi pi-trash"
+                severity="danger"
+                [text]="true"
+                size="small"
+                [ariaLabel]="m.common.delete"
+                (onClick)="remove(l)"
+              />
+            </td>
           </tr>
         </ng-template>
       </p-table>
-      <form class="form-grid" (ngSubmit)="add()">
+      <h4>{{ editing() ? m.mapLayers.edit + ': ' + editing()!.name : m.mapLayers.newLayer }}</h4>
+      <form class="form-grid" (ngSubmit)="save()">
         <div class="row">
           <div class="field">
             <label for="ml-name">{{ m.mapLayers.name }}</label>
@@ -43,7 +73,17 @@ import { SelectionService } from '../../core/selection/selection.service';
           </div>
           <div class="field">
             <label for="ml-source">{{ m.mapLayers.source }}</label>
-            <p-select inputId="ml-source" name="source" [options]="sources()" optionLabel="label" optionValue="value" [(ngModel)]="source" appendTo="body" fluid />
+            <p-select
+              inputId="ml-source"
+              name="source"
+              [options]="sources()"
+              optionLabel="label"
+              optionValue="value"
+              [(ngModel)]="source"
+              appendTo="body"
+              fluid
+              [disabled]="!!editing()"
+            />
           </div>
         </div>
         <div class="row">
@@ -53,24 +93,80 @@ import { SelectionService } from '../../core/selection/selection.service';
           </div>
           <div class="field">
             <label for="ml-scope">{{ m.mapLayers.scope }}</label>
-            <p-select inputId="ml-scope" name="scope" [options]="scopes()" optionLabel="label" optionValue="value" [(ngModel)]="siteOnly" appendTo="body" fluid />
+            <p-select
+              inputId="ml-scope"
+              name="scope"
+              [options]="scopes()"
+              optionLabel="label"
+              optionValue="value"
+              [(ngModel)]="siteOnly"
+              appendTo="body"
+              fluid
+              [disabled]="!!editing()"
+            />
           </div>
         </div>
         @if (source === 'external_wms') {
           <div class="field">
             <label for="ml-url">{{ m.mapLayers.url }}</label>
-            <input pInputText id="ml-url" name="url" [(ngModel)]="url" placeholder="https://…/wms" />
+            <input
+              pInputText
+              id="ml-url"
+              name="url"
+              [(ngModel)]="url"
+              placeholder="https://…/wms"
+            />
           </div>
         }
-        <label class="check"><p-checkbox [binary]="true" name="visible" [(ngModel)]="visibleDefault" /> {{ m.mapLayers.visible }}</label>
+        <div class="field">
+          <label for="ml-crs">{{ m.mapLayers.crs }}</label>
+          <p-select
+            inputId="ml-crs"
+            name="crs"
+            [options]="m.mapLayers.crsOptions"
+            optionLabel="label"
+            optionValue="value"
+            [(ngModel)]="crs"
+            appendTo="body"
+            fluid
+          />
+          <small class="muted">{{ m.mapLayers.crsHint }}</small>
+        </div>
+        <label class="check"
+          ><p-checkbox [binary]="true" name="visible" [(ngModel)]="visibleDefault" />
+          {{ m.mapLayers.visible }}</label
+        >
+        @if (editing()) {
+          <small class="muted">{{ m.mapLayers.sourceFixed }}</small>
+        }
         <div class="actions">
-          <p-button type="submit" [label]="m.common.add" icon="pi pi-plus" [loading]="saving()"
-            [disabled]="!name.trim() || !layer.trim() || (source === 'external_wms' && !url.trim())" />
+          @if (editing()) {
+            <p-button
+              [label]="m.mapLayers.cancelEdit"
+              severity="secondary"
+              [text]="true"
+              (onClick)="reset()"
+            />
+          }
+          <p-button
+            type="submit"
+            [label]="editing() ? m.common.save : m.common.add"
+            [icon]="editing() ? 'pi pi-save' : 'pi pi-plus'"
+            [loading]="saving()"
+            [disabled]="!name.trim() || !layer.trim() || (source === 'external_wms' && !url.trim())"
+          />
         </div>
       </form>
     </p-dialog>
   `,
   styles: `
+    .row-actions {
+      white-space: nowrap;
+      text-align: right;
+    }
+    h4 {
+      margin: 0 0 0.5rem;
+    }
     :host ::ng-deep .list {
       margin: 0.75rem 0 1rem;
     }
@@ -89,6 +185,7 @@ export class MapLayersDialog {
   protected readonly m = inject(MESSAGES);
   private readonly api = inject(ApiService);
   private readonly selection = inject(SelectionService);
+  private readonly toasts = inject(MessageService);
 
   readonly visible = model(false);
 
@@ -100,9 +197,16 @@ export class MapLayersDialog {
   protected url = '';
   protected siteOnly = false;
   protected visibleDefault = true;
+  /** The coordinate system the layer is requested in (wmsParams.CRS; the map's own when EPSG:3857). */
+  protected crs = 'EPSG:3857';
+  /** The layer being edited (null: a new one). */
+  protected readonly editing = signal<MapLayer | null>(null);
 
   protected readonly sources = computed(() =>
-    (['external_wms', 'mapmanager'] as const).map((value) => ({ value, label: this.m.mapLayers.sources[value] })),
+    (['external_wms', 'mapmanager'] as const).map((value) => ({
+      value,
+      label: this.m.mapLayers.sources[value],
+    })),
   );
   protected readonly scopes = computed(() => [
     { value: false, label: this.m.mapLayers.allSites },
@@ -113,31 +217,69 @@ export class MapLayersDialog {
     this.api.mapLayers(this.selection.siteId()).subscribe((layers) => this.layers.set(layers));
   }
 
-  protected add(): void {
+  protected edit(layer: MapLayer): void {
+    this.editing.set(layer);
+    this.name = layer.name;
+    this.source = layer.source;
+    this.layer = layer.layer;
+    this.url = layer.externalUrl ?? '';
+    this.siteOnly = layer.siteId != null;
+    this.visibleDefault = layer.visibleDefault;
+    this.crs = String(layer.wmsParams?.['CRS'] ?? 'EPSG:3857').toUpperCase();
+  }
+
+  protected reset(): void {
+    this.editing.set(null);
+    this.name = this.layer = this.url = '';
+    this.source = 'external_wms';
+    this.siteOnly = false;
+    this.visibleDefault = true;
+    this.crs = 'EPSG:3857';
+  }
+
+  /** The layer's WMS parameters with the chosen coordinate system (none: the map's own). */
+  private params(previous: Record<string, unknown> = {}): Record<string, unknown> {
+    const { CRS: _crs, SRS: _srs, ...rest } = previous;
+    return this.crs === 'EPSG:3857' ? rest : { ...rest, CRS: this.crs };
+  }
+
+  protected save(): void {
+    const editing = this.editing();
     this.saving.set(true);
-    this.api
-      .createMapLayer({
-        name: this.name.trim(),
-        source: this.source,
-        layer: this.layer.trim(),
-        externalUrl: this.source === 'external_wms' ? this.url.trim() : null,
-        siteId: this.siteOnly ? this.selection.siteId() : null,
-        visibleDefault: this.visibleDefault,
-        sortOrder: this.layers().length,
-      })
-      .subscribe({
-        next: () => {
-          this.saving.set(false);
-          this.name = this.layer = this.url = '';
-          this.load();
-          this.selection.changed();
-        },
-        error: () => this.saving.set(false),
-      });
+    const request = editing
+      ? this.api.updateMapLayer(editing.id, {
+          name: this.name.trim(),
+          layer: this.layer.trim(),
+          ...(editing.source === 'external_wms' ? { externalUrl: this.url.trim() } : {}),
+          visibleDefault: this.visibleDefault,
+          wmsParams: this.params(editing.wmsParams),
+        })
+      : this.api.createMapLayer({
+          name: this.name.trim(),
+          source: this.source,
+          layer: this.layer.trim(),
+          externalUrl: this.source === 'external_wms' ? this.url.trim() : null,
+          siteId: this.siteOnly ? this.selection.siteId() : null,
+          visibleDefault: this.visibleDefault,
+          sortOrder: this.layers().length,
+          wmsParams: this.params(),
+        });
+    request.subscribe({
+      next: () => {
+        this.saving.set(false);
+        if (editing)
+          this.toasts.add({ severity: 'success', summary: this.m.mapLayers.saved, life: 2500 });
+        this.reset();
+        this.load();
+        this.selection.changed();
+      },
+      error: () => this.saving.set(false),
+    });
   }
 
   protected remove(layer: MapLayer): void {
     this.api.deleteMapLayer(layer.id).subscribe(() => {
+      if (this.editing()?.id === layer.id) this.reset();
       this.load();
       this.selection.changed();
     });

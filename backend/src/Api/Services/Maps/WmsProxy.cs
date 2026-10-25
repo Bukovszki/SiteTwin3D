@@ -58,7 +58,26 @@ public class WmsProxy(IHttpClientFactory httpFactory, MapManagerClient mapManage
         if (!response.IsSuccessStatusCode)
             throw new AppException(StatusCodes.Status502BadGateway, "maps.wms_unavailable", $"The WMS server answered {(int)response.StatusCode}.");
         var contentType = response.Content.Headers.ContentType?.ToString() ?? "application/octet-stream";
+        // A map asked for, an error message got (wrong layer name, unsupported coordinate system …): the reason goes to
+        // the client instead of an image the map cannot show.
+        var isMap = query.Any(p => p.Key == "REQUEST" && p.Value.Equals("GetMap", StringComparison.OrdinalIgnoreCase));
+        if (isMap && (contentType.Contains("xml", StringComparison.OrdinalIgnoreCase) || contentType.StartsWith("text/", StringComparison.OrdinalIgnoreCase)))
+            throw new AppException(StatusCodes.Status502BadGateway, "maps.wms_error",
+                $"The WMS server answered with a message instead of a map: {await ServiceExceptionAsync(response, ct)}");
         return TypedResults.Stream(await response.Content.ReadAsStreamAsync(ct), contentType);
+    }
+
+    /// <summary>The text of a WMS ServiceException (or the start of whatever came), at most 500 characters.</summary>
+    private static async Task<string> ServiceExceptionAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        var buffer = new char[8192];
+        using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(ct));
+        var text = new string(buffer, 0, await reader.ReadBlockAsync(buffer, ct));
+        var match = System.Text.RegularExpressions.Regex.Match(text, @"<(?:\w+:)?ServiceException[^>]*>(.*?)</(?:\w+:)?ServiceException>",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+        var message = (match.Success ? match.Groups[1].Value : text).Trim();
+        message = System.Text.RegularExpressions.Regex.Replace(message, @"\s+", " ");
+        return message.Length > 500 ? message[..500] + "…" : message;
     }
 
     public static List<KeyValuePair<string, string>> BuildQuery(IQueryCollection request, WmsTarget target)

@@ -32,6 +32,9 @@ public sealed class FakeGeoServer : HttpMessageHandler
     /// <summary>Layers with geometry (e.g. a floorplan): GeoJSON geometries as the test gives them (EPSG:3857).</summary>
     public Dictionary<string, List<JsonObject>> GeometryLayers { get; } = [];
 
+    /// <summary>A test's own answer to WMS requests (e.g. a ServiceException); null: the PNG.</summary>
+    public Func<HttpRequestMessage, HttpResponseMessage>? WmsAnswer { get; set; }
+
     public IEnumerable<Dictionary<string, string>> Queries =>
         Requests.Select(r => QueryHelpers.ParseQuery(r.RequestUri!.Query).ToDictionary(p => p.Key.ToUpperInvariant(), p => p.Value.ToString()));
 
@@ -42,6 +45,8 @@ public sealed class FakeGeoServer : HttpMessageHandler
             .ToDictionary(p => p.Key.ToUpperInvariant(), p => p.Value.ToString());
         var requestType = query.GetValueOrDefault("REQUEST", "");
 
+        if ((request.RequestUri.AbsolutePath.EndsWith("/wms") || query.GetValueOrDefault("SERVICE") == "WMS") && WmsAnswer is { } answer)
+            return Task.FromResult(answer(request));
         if (request.RequestUri.AbsolutePath.EndsWith("/wms") || query.GetValueOrDefault("SERVICE") == "WMS")
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Png) { Headers = { { "Content-Type", "image/png" } } } });
 

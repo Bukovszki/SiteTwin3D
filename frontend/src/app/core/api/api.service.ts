@@ -323,7 +323,10 @@ export class ApiService {
   }
   createMapLayer(layer: Partial<MapLayer>): Observable<MapLayer> {
     return this.http.post<MapLayer>(`${API}/map-layers`, layer);
+  }  updateMapLayer(id: number, patch: Partial<MapLayer>): Observable<MapLayer> {
+    return this.http.patch<MapLayer>(`${API}/map-layers/${id}`, patch);
   }
+
   deleteMapLayer(id: number): Observable<void> {
     return this.http.delete<void>(`${API}/map-layers/${id}`);
   }

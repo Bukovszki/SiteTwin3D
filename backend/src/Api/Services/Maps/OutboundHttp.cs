@@ -29,7 +29,8 @@ public class MapManagerOptions
 /// internal network (e.g. the same compose network).</item>
 /// <item><see cref="ExternalWmsClientName"/>: the URL is set by an organization admin, so the connection is refused to
 /// loopback, private and link-local addresses (SSRF: the API must not become a door to the internal network). The
-/// check runs on the resolved address at connect time, so DNS tricks do not bypass it.</item>
+/// check runs on the resolved address at connect time, so DNS tricks do not bypass it – also for redirects, which are
+/// followed (at most 3; e.g. http → https or a moved service): every connection goes through the same check.</item>
 /// </list>
 /// </summary>
 public static class OutboundHttp
@@ -49,7 +50,8 @@ public static class OutboundHttp
         services.AddHttpClient(ExternalWmsClientName, c => c.Timeout = TimeSpan.FromSeconds(maps.TimeoutSeconds))
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
             {
-                AllowAutoRedirect = false,
+                AllowAutoRedirect = true,
+                MaxAutomaticRedirections = 3,
                 ConnectCallback = maps.AllowPrivateNetworks ? null : ConnectPublicOnlyAsync,
             });
         return services;
@@ -58,24 +60,40 @@ public static class OutboundHttp
     private static async ValueTask<Stream> ConnectPublicOnlyAsync(SocketsHttpConnectionContext context, CancellationToken ct)
     {
         var addresses = await Dns.GetHostAddressesAsync(context.DnsEndPoint.Host, ct);
-        var allowed = addresses.Where(IsPublic).ToArray();
+        // IPv4 first: a server's IPv6 address is often unreachable from a container without IPv6.
+        var allowed = addresses.Where(IsPublic).OrderBy(a => a.AddressFamily == AddressFamily.InterNetwork ? 0 : 1).ToArray();
         if (allowed.Length == 0)
             throw new HttpRequestException($"Connection to {context.DnsEndPoint.Host} refused: not a public address.");
 
-        var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
-        try
+        Exception? last = null;
+        foreach (var address in allowed)
         {
-            await socket.ConnectAsync(allowed, context.DnsEndPoint.Port, ct);
-            return new NetworkStream(socket, ownsSocket: true);
+            var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+            // A silent address must not hold the map for the whole request timeout.
+            using var attempt = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            attempt.CancelAfter(ConnectTimeout);
+            try
+            {
+                await socket.ConnectAsync(address, context.DnsEndPoint.Port, attempt.Token);
+                return new NetworkStream(socket, ownsSocket: true);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                socket.Dispose();
+                last = ex;
+            }
+            catch
+            {
+                socket.Dispose();
+                throw;
+            }
         }
-        catch
-        {
-            socket.Dispose();
-            throw;
-        }
+        throw new HttpRequestException($"Cannot connect to {context.DnsEndPoint.Host}:{context.DnsEndPoint.Port}.", last);
     }
 
     /// <summary>False for loopback, private (RFC 1918, ULA), link-local, CGNAT, unspecified and multicast addresses.</summary>
+    private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(10);
+
     public static bool IsPublic(IPAddress address)
     {
         if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
