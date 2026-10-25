@@ -11,7 +11,7 @@ import VectorLayer from 'ol/layer/Vector';
 import { fromLonLat, toLonLat } from 'ol/proj';
 import ImageWMS from 'ol/source/ImageWMS';
 import VectorSource from 'ol/source/Vector';
-import { Circle, Fill, RegularShape, Stroke, Style, Text } from 'ol/style';
+import { Circle, Fill, Icon, Stroke, Style, Text } from 'ol/style';
 import { MessageService } from 'primeng/api';
 import { Button } from 'primeng/button';
 import { Checkbox } from 'primeng/checkbox';
@@ -28,8 +28,10 @@ import { fromBoxFrame } from '../../viewer3d/box-math';
 import { DrawPanel } from '../drawing/draw-panel';
 import { PanoramaUploadDialog } from '../panorama/panorama-upload-dialog';
 import { FloorplansDialog } from './floorplans-dialog';
+import { MapLegend } from './map-legend';
 import { Permissions } from '../../core/auth/permissions';
 import { MESSAGES } from '../../core/i18n/messages';
+import { PIN, panoramaIcon, panoramaState, placeIcon, siteIcon } from '../../core/markers/marker-icons';
 import { SelectionService } from '../../core/selection/selection.service';
 import { LonLat, MapToolsService } from './map-tools.service';
 
@@ -51,7 +53,7 @@ const CONE_LENGTH_M = 8;
  */
 @Component({
   selector: 'app-overview-map',
-  imports: [FormsModule, Button, Checkbox, Message, Select, Tooltip, PanoramaUploadDialog, FloorplansDialog, DrawPanel],
+  imports: [FormsModule, Button, Checkbox, Message, Select, Tooltip, PanoramaUploadDialog, FloorplansDialog, DrawPanel, MapLegend],
   template: `
     <div #map class="map"></div>
     @if (selection.siteId() != null) {
@@ -73,6 +75,7 @@ const CONE_LENGTH_M = 8;
       @if (drawingOpen()) {
         <div class="draw-dock"><app-draw-panel [map]="olMap()" /></div>
       }
+      <app-map-legend class="legend-dock" />
     }
     @if (layers().length > 0) {
       <div class="layer-switcher">
@@ -135,6 +138,11 @@ const CONE_LENGTH_M = 8;
       border: 1px solid var(--p-content-border-color);
       border-radius: 8px;
       box-shadow: 0 2px 8px rgb(0 0 0 / 0.1);
+    }
+    .legend-dock {
+      position: absolute;
+      right: 0.5rem;
+      bottom: 1.75rem;
     }
     .draw-dock {
       position: absolute;
@@ -322,7 +330,7 @@ export class OverviewMap {
 
   private placeFeature(p: Place): Feature<Geometry> {
     const feature = new Feature<Geometry>(new Point(fromLonLat(p.position.coordinates)));
-    feature.setProperties({ anchorId: p.anchorId, nodeId: p.nodeId, name: p.nodeName, kind: p.source, selected: this.selection.highlightIds().has(p.nodeId) });
+    feature.setProperties({ anchorId: p.anchorId, nodeId: p.nodeId, name: p.nodeName, kind: p.source, typeCode: p.typeCode, selected: this.selection.highlightIds().has(p.nodeId) });
     return feature;
   }
 
@@ -349,21 +357,35 @@ export class OverviewMap {
     });
   }
 
-  /** One marker per node (FR-AR1b): diamond if its place is only an info point's; the selected node (subtree) highlighted. */
+  /** Map icons by image (one OpenLayers Icon per symbol, shared by the features). */
+  private readonly icons = new Map<string, Icon>();
+  private icon(src: string, anchor: [number, number], scale = 1): Icon {
+    const key = `${src}|${scale}`;
+    let icon = this.icons.get(key);
+    if (!icon) {
+      icon = new Icon({ src, anchor, scale });
+      this.icons.set(key, icon);
+    }
+    return icon;
+  }
+
+  /**
+   * One marker per node (FR-AR1b): a pin with the record type's symbol (core/markers); hollow if its place is only an
+   * info point's (approximate); the selected node (subtree) highlighted.
+   */
   private anchorStyle(feature: Feature<Geometry>): Style {
     const selected = feature.get('selected') as boolean;
+    const src = placeIcon({ typeCode: feature.get('typeCode'), selected, approximate: feature.get('kind') === 'panorama_point' });
     return new Style({
-      image: new RegularShape({
-        points: 4, radius: selected ? 10 : 7, angle: feature.get('kind') === 'panorama_point' ? 0 : Math.PI / 4,
-        fill: new Fill({ color: selected ? '#facc15' : '#f97316' }), stroke: new Stroke({ color: selected ? '#1e293b' : '#fff', width: 2 }),
-      }),
+      image: this.icon(src, [0.5, 1], selected ? 1.2 : 1),
       text: new Text({
-        text: feature.get('name') as string, offsetY: -16, font: `${selected ? 700 : 600} 11px system-ui, sans-serif`,
+        text: feature.get('name') as string, offsetY: -(PIN.height * (selected ? 1.2 : 1)) - 7, font: `${selected ? 700 : 600} 11px system-ui, sans-serif`,
         fill: new Fill({ color: '#1e293b' }), stroke: new Stroke({ color: '#fff', width: 3 }),
       }),
       zIndex: selected ? 3 : 1,
     });
   }
+
 
   /**
    * A node selected anywhere: if it has an anchor but none on the current level, the map goes to the level and place
@@ -408,11 +430,9 @@ export class OverviewMap {
   }
 
   private panoramaStyle(feature: Feature<Geometry>): Style {
-    const status = feature.get('status') as string;
     const open = feature.get('open') as boolean;
-    const color = status === 'approved' ? '#2563eb' : status === 'failed' ? '#dc2626' : '#f59e0b';
     return new Style({
-      image: new Circle({ radius: open ? 9 : 7, fill: new Fill({ color }), stroke: new Stroke({ color: '#fff', width: open ? 3 : 2 }) }),
+      image: this.icon(panoramaIcon(panoramaState(feature.get('status') as string), open), [0.5, 0.5]),
       zIndex: open ? 2 : 1,
     });
   }
@@ -445,7 +465,8 @@ export class OverviewMap {
           zIndex: 112,
           style: new Style({ stroke: new Stroke({ color: '#2563eb', width: 2, lineDash: [6, 4] }) }),
         }),
-        new VectorLayer({ source: this.panoramaSource, style: (f) => this.panoramaStyle(f as Feature<Geometry>), zIndex: 120 }),
+        // Above the pins: a pin's tip often lands on a panorama taken at the same place (room centre), which must stay clickable.
+        new VectorLayer({ source: this.panoramaSource, style: (f) => this.panoramaStyle(f as Feature<Geometry>), zIndex: 130 }),
         new VectorLayer({ source: this.footprintSource, style: (f) => this.footprintStyle(f as Feature<Geometry>), zIndex: 110 }),
         new VectorLayer({ source: this.anchorSource, style: (f) => this.anchorStyle(f as Feature<Geometry>), zIndex: 125 }),
         new VectorLayer({
@@ -574,10 +595,10 @@ export class OverviewMap {
     if (feature.get('isExtent'))
       return new Style({ stroke: new Stroke({ color, width: selected ? 2.5 : 1.5, lineDash: [6, 4] }), fill: new Fill({ color: 'rgba(37, 99, 235, 0.04)' }) });
     return new Style({
-      image: new Circle({ radius: selected ? 8 : 6, fill: new Fill({ color }), stroke: new Stroke({ color: '#fff', width: 2 }) }),
+      image: this.icon(siteIcon(selected), [0.5, 0.5]),
       text: new Text({
         text: feature.get('name') as string,
-        offsetY: -16,
+        offsetY: -20,
         font: '600 12px system-ui, sans-serif',
         fill: new Fill({ color: '#1e293b' }),
         stroke: new Stroke({ color: '#fff', width: 3 }),

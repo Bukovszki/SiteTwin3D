@@ -71,6 +71,7 @@ import {
   smallestContaining,
 } from './box-math';
 import { handleAxis, handleCursor, handleIcon } from './handle-icons';
+import { PIN, placeIcon } from '../core/markers/marker-icons';
 import { ModelsDialog } from './models-dialog';
 import { BoxImportDialog } from '../features/import/box-import-dialog';
 
@@ -1095,11 +1096,16 @@ export class ModelViewer {
             lat,
             site.baseHeightM + this.levelElevation(p.levelId) + p.zRelM,
           ),
-          point: {
-            pixelSize: lit ? 14 : 10,
-            color: Color.fromCssColorString(lit ? '#facc15' : '#f97316'),
-            outlineColor: Color.WHITE,
-            outlineWidth: 2,
+          // The record's pin (same symbol as on the floorplan and the panorama); hollow: only an info point's place.
+          billboard: {
+            image: placeIcon({
+              typeCode: p.typeCode,
+              selected: lit,
+              approximate: p.source === 'panorama_point',
+            }),
+            width: PIN.width * (lit ? 1.2 : 1),
+            height: PIN.height * (lit ? 1.2 : 1),
+            verticalOrigin: VerticalOrigin.BOTTOM,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
           label: {
@@ -1110,7 +1116,7 @@ export class ModelViewer {
             outlineWidth: 3,
             style: LabelStyle.FILL_AND_OUTLINE,
             verticalOrigin: VerticalOrigin.BOTTOM,
-            pixelOffset: new Cartesian2(0, -12),
+            pixelOffset: new Cartesian2(0, -PIN.height * (lit ? 1.2 : 1) - 4),
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
         }),

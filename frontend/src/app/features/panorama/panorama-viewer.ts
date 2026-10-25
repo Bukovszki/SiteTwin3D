@@ -31,6 +31,7 @@ import { Anchor, Panorama, PanoramaNeighbour } from '../../core/api/models';
 import { normalizeHeading, normalizeYaw } from '../../core/geo/geodesy';
 import { MESSAGES } from '../../core/i18n/messages';
 import { SelectionService } from '../../core/selection/selection.service';
+import { PIN, neighbourIcon, placeIcon } from '../../core/markers/marker-icons';
 
 /**
  * Offset between the panorama's heading (direction of the image centre) and the Cesium heading of its transform:
@@ -122,6 +123,8 @@ export class PanoramaViewer {
   readonly highlightNodeId = signal<number | null>(null);
   /** Boxes of the selected node (region anchors): drawn where they stand, if on the panorama's level (M6). */
   readonly boxes = signal<Anchor[]>([]);
+  /** The boxes may be switched off (they hide the picture behind them). */
+  readonly showBoxes = signal(true);
   /** Info points may be dragged (editing modes). */
   readonly editable = signal(false);
   /** Picking a direction (placing an info point, calibrating): markers do not select, the click is the direction. */
@@ -143,6 +146,7 @@ export class PanoramaViewer {
       const infoPoints = this.infoPoints();
       const highlight = this.highlightNodeId();
       this.boxes();
+      this.showBoxes();
       untracked(() => this.drawMarkers(neighbours, infoPoints, highlight));
     });
   }
@@ -177,11 +181,10 @@ export class PanoramaViewer {
         new Entity({
           id: `nav:${n.id}`,
           position: this.direction(n.bearingDeg, NAV_PITCH, NAV_DISTANCE),
-          point: {
-            pixelSize: 22,
-            color: Color.WHITE.withAlpha(0.85),
-            outlineColor: Color.fromCssColorString('#2563eb'),
-            outlineWidth: 4,
+          billboard: {
+            image: neighbourIcon(),
+            width: 30,
+            height: 30,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
           label: {
@@ -205,11 +208,12 @@ export class PanoramaViewer {
         new Entity({
           id: `info:${a.nodeId}:${a.id}`,
           position: this.direction(heading + a.yawDeg, a.pitchDeg, INFO_DISTANCE),
-          point: {
-            pixelSize: selected ? 20 : 14,
-            color: Color.fromCssColorString(selected ? '#facc15' : '#f97316'),
-            outlineColor: Color.WHITE,
-            outlineWidth: selected ? 4 : 2,
+          // The record's pin (same symbol as on the floorplan and in 3D), its tip on the point.
+          billboard: {
+            image: placeIcon({ typeCode: a.typeCode, selected }),
+            width: PIN.width * (selected ? 1.25 : 1),
+            height: PIN.height * (selected ? 1.25 : 1),
+            verticalOrigin: VerticalOrigin.BOTTOM,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
           label: {
@@ -220,7 +224,7 @@ export class PanoramaViewer {
             outlineWidth: 3,
             style: LabelStyle.FILL_AND_OUTLINE,
             verticalOrigin: VerticalOrigin.BOTTOM,
-            pixelOffset: new Cartesian2(0, -14),
+            pixelOffset: new Cartesian2(0, -PIN.height * (selected ? 1.25 : 1) - 4),
             showBackground: selected,
             backgroundColor: Color.fromCssColorString('#1e293b').withAlpha(0.7),
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
@@ -238,7 +242,7 @@ export class PanoramaViewer {
    */
   private drawBoxes(): void {
     const p = this.panorama;
-    if (!this.viewer || !p || p.absoluteHeightM == null) return;
+    if (!this.viewer || !p || p.absoluteHeightM == null || !this.showBoxes()) return;
     const floor = p.absoluteHeightM - p.zRelM;
     for (const b of this.boxes()) {
       if (

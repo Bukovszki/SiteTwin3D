@@ -17,6 +17,16 @@ import { MapToolsService } from '../map/map-tools.service';
 import { PanoramaClick, PanoramaViewer } from './panorama-viewer';
 import { PrivacyReviewDialog } from './privacy-review-dialog';
 
+const SHOW_BOXES_KEY = 'panorama.showBoxes';
+
+function readShowBoxes(): boolean {
+  try {
+    return localStorage.getItem(SHOW_BOXES_KEY) !== 'false';
+  } catch {
+    return true;
+  }
+}
+
 /**
  * The open panorama: viewer plus its state (privacy processing, orientation) and the editor tools – orientation
  * calibration (FR-P6: the same point clicked on the panorama and on the floorplan), privacy review (FR-P8), delete.
@@ -38,6 +48,15 @@ import { PrivacyReviewDialog } from './privacy-review-dialog';
           />
         }
         <span class="spacer"></span>
+        <p-button
+          icon="pi pi-box"
+          [text]="!showBoxes()"
+          [outlined]="showBoxes()"
+          size="small"
+          [pTooltip]="showBoxes() ? m.panorama.hideBoxes : m.panorama.showBoxes"
+          [ariaLabel]="showBoxes() ? m.panorama.hideBoxes : m.panorama.showBoxes"
+          (onClick)="toggleBoxes()"
+        />
         @if (can.anchors()) {
           <p-button
             icon="pi pi-map-marker"
@@ -182,6 +201,8 @@ export class PanoramaPanel {
   private placing = false;
   protected readonly neighbours = signal<PanoramaNeighbour[]>([]);
   protected readonly infoPoints = signal<Anchor[]>([]);
+  /** The selected record's boxes on the panorama: on by default; the choice is remembered in this browser. */
+  protected readonly showBoxes = signal(readShowBoxes());
 
   protected readonly severity = computed(() => {
     switch (this.panorama()?.privacyStatus) {
@@ -219,6 +240,21 @@ export class PanoramaPanel {
           });
       });
     });
+  }
+
+  private readonly boxesShown = effect(() => {
+    const show = this.showBoxes();
+    untracked(() => this.viewer().showBoxes.set(show));
+  });
+
+  protected toggleBoxes(): void {
+    const show = !this.showBoxes();
+    this.showBoxes.set(show);
+    try {
+      localStorage.setItem(SHOW_BOXES_KEY, String(show));
+    } catch {
+      // No storage (private window): the choice lasts for this page only.
+    }
   }
 
   /** Info points can be dragged only in an editing session (AnchorEditService), never by accident. */

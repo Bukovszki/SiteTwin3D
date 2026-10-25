@@ -264,6 +264,8 @@ A Fa **Adatok** nézete ugyanaz a helyszíni szerkezet, de az elemek alatt a hoz
 
 A panorámán egérrel körülnézhet, görgővel nagyíthat. A **navigációs jelek** a szomszédos panorámákra visznek; az **infopontokra** kattintva a berendezés kijelölődik és az adatlapja megnyílik. A térképen a panoráma látószöge is látszik.
 
+A kijelölt elem **befoglaló doboza** a panorámán is megjelenik; ha eltakarja a képet, a panoráma eszköztárának kocka gombjával (*Befoglaló dobozok elrejtése*) kikapcsolható. A böngésző megjegyzi a választást.
+
 ### 3D: szintek és funkcionális nézet
 
 ![3D szintnézet](images/guide-04-3d-szint.png)
