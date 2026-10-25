@@ -150,6 +150,9 @@ public partial class PanoramaService(AppDbContext db, IObjectStorage storage, Pa
                 ?? throw AppException.NotFound("node.not_found", $"Node {nodeId} not found.");
             if (node.SiteId != siteId) throw AppException.BadRequest("panorama.other_site", "The node is on another site.");
             panorama.NodeId = nodeId;
+            // The level follows the new place unless given in the same request (user report: moved from a building to
+            // its ground floor in the data tree, the map kept showing it on the old level).
+            if (!request.LevelIdSet) panorama.LevelId = await LevelOfAsync(node, panorama.LevelId, ct);
         }
         if (request.Position is not null) panorama.Position = NodeService.Wgs84(request.Position)!;
         if (request.LevelIdSet)
@@ -162,6 +165,21 @@ public partial class PanoramaService(AppDbContext db, IObjectStorage storage, Pa
         if (request.CapturedAt is { } captured) panorama.CapturedAt = captured;
         await db.SaveChangesAsync(ct);
         return panorama;
+    }
+
+    /// <summary>
+    /// The level of a place: the deepest level in its path (a level itself, a room on it); above the levels (a building)
+    /// the current level if it is inside that place, else none (outdoor).
+    /// </summary>
+    private async Task<long?> LevelOfAsync(Node node, long? current, CancellationToken ct)
+    {
+        var ids = node.Path.ToString().Split('.').Select(long.Parse).ToList();
+        var levels = await db.Nodes.AsNoTracking().Where(n => ids.Contains(n.Id) && n.Type.IsLevel).Select(n => n.Id).ToListAsync(ct);
+        var deepest = ids.LastOrDefault(levels.Contains);
+        if (deepest != 0) return deepest;
+        if (current is not { } levelId) return null;
+        var inside = await db.Nodes.AnyAsync(n => n.Id == levelId && n.Path.IsDescendantOf(node.Path), ct);
+        return inside ? levelId : null;
     }
 
     public async Task DeleteAsync(long id, CancellationToken ct)

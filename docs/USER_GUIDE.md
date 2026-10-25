@@ -163,6 +163,7 @@ A rendszer a háttérben arcokat keres a képen. Amíg ez fut, a panoráma álla
 
 - **Tájolás kalibrálása** (iránytű ikon): kattintson egy jól azonosítható pontra (ajtó, sarok) a panorámán, majd ugyanarra az alaprajzon. Enélkül az infopontok iránya pontatlan lehet.
 - **Szomszédok automatikus összekötése (szint)**: a közeli panorámák között bejárási kapcsolatok jönnek létre. **Kapcsolat be/ki**: egy másik panorámára kattintva a kapcsolat kézzel kapcsolható.
+- **Panoráma adatai** (ceruza ikon a panoráma paneljén, Előkészítés): utólag átírható, melyik elemhez tartozik, melyik szinten van és hol készült (*Hely kijelölése az alaprajzon*). Másik elem választásakor a szint magától követi (pl. a földszint egy helyiségéhez kötve a földszint). Ugyanez történik, ha a panorámát az **Adatok** fában húzza át másik elemre.
 
 ### 6. 3D adatok
 
@@ -288,6 +289,7 @@ A kijelölt elem **befoglaló doboza** a panorámán is megjelenik; ha eltakarja
 
 - **Szint kiválasztása** (a 3D eszköztár bal szélén): a modell a szint mennyezete felett le van vágva – belelát az épületbe. *Teljes modell*: vágás nélkül.
 - **Ugrás a modellre** (ház ikon): vissza az áttekintéshez.
+- **Alaptérkép** (a ház ikon melletti lista): a háttérréteg (pl. OpenStreetMap) laposan, a modell alatt, a telephely alapmagasságában – kiterített térképként, nem földgömbön. Alapból a térképen is alapból látszó réteg; *Alaptérkép nélkül* kikapcsolja. Csak Web Mercator vagy WGS84 vetületű réteg tehető alá; az EOV-ban szolgáltatott réteg csak a 2D térképen látszik.
 - Egy **technológiai vonal** kijelölésekor minden berendezése egyszerre kiemelődik – épületeken és szinteken át; *Teljes modell* nézetben a modell áttetszővé válik, a kiemelt elemek a falakon át is látszanak.
 
 ![Funkcionális nézet](images/guide-05-funkcionalis.png)

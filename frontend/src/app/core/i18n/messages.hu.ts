@@ -398,6 +398,9 @@ export const MESSAGES_HU = {
     delete: 'Panoráma törlése',
     deleteConfirm: 'Biztosan törli a panorámát és a fájljait?',
     moved: 'A panoráma helye mentve',
+    edit: 'Panoráma adatai (kapcsolódó elem, szint, hely)',
+    levelFollows: 'Másik elem választásakor a szint magától követi (a szint vagy a helyiség szintje); szükség esetén átírható.',
+    saved: 'A panoráma adatai mentve',
     errors: {
       'panorama.checksum_mismatch': 'A feltöltött fájl sérült (ellenőrzőösszeg-eltérés).',
       'panorama.not_equirectangular': 'A kép nem 2:1 arányú equirectangular panoráma.',
@@ -478,6 +481,8 @@ export const MESSAGES_HU = {
     noModelView: 'Ehhez a telephelyhez még nincs 3D modell.',
     converting: 'Egy modell átalakítása folyamatban – kész állapotban magától megjelenik.',
     flyTo: 'Ugrás a modellre',
+    noGround: 'Alaptérkép nélkül',
+    groundHint: 'Alaptérkép a modell alatt, a telephely alapmagasságában (a Web Mercator vagy WGS84 háttérrétegek közül; az EOV-ban szolgáltatott réteg csak a térképen látszik).',
     loadFailed: (name: string) => `A(z) „${name}” modell nem tölthető be.`,
     levelHint: 'Szint kiválasztásakor a modell a szint mennyezete felett le van vágva.',
     snap: 'Illesztés (m)',

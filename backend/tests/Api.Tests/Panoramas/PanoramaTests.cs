@@ -185,6 +185,29 @@ public sealed class PanoramaTests(PostgisFixture postgis) : ApiTestBase(postgis)
     }
 
     [Fact]
+    public async Task MovedToAnotherNode_TheLevelFollowsTheHierarchy()
+    {
+        // User report: a panorama moved in the data tree from the building to a room of its floor stayed on the old level.
+        var s = await SiteWithLevelAsync();
+        var outdoorArea = (await s.Org.Http.CreateNodeAsync(s.Site, null, await s.Org.Http.TypeIdAsync("outdoor_area"), "Udvar")).GetProperty("id").GetInt64();
+        var room = (await s.Org.Http.CreateNodeAsync(s.Site, s.Level, await s.Org.Http.TypeIdAsync("room"), "Gépterem")).GetProperty("id").GetInt64();
+        var id = (await UploadAsync(s, PanoramaWithFace())).GetProperty("id").GetInt64();
+        long? Level(JsonElement p) => p.GetProperty("levelId") is { ValueKind: JsonValueKind.Number } l ? l.GetInt64() : null;
+
+        var outside = await TestApi.ReadJson(await s.Org.Http.PatchJsonAsync($"/api/v1/panoramas/{id}", new { nodeId = outdoorArea }));
+        var inRoom = await TestApi.ReadJson(await s.Org.Http.PatchJsonAsync($"/api/v1/panoramas/{id}", new { nodeId = room }));
+        // Back to the building: its level is inside the building, so it stays.
+        var inBuilding = await TestApi.ReadJson(await s.Org.Http.PatchJsonAsync($"/api/v1/panoramas/{id}", new { nodeId = s.Building }));
+        // A level given with the move wins.
+        var given = await TestApi.ReadJson(await s.Org.Http.PatchJsonAsync($"/api/v1/panoramas/{id}", new { nodeId = room, levelId = (long?)null }));
+
+        Assert.Null(Level(outside));
+        Assert.Equal(s.Level, Level(inRoom));
+        Assert.Equal(s.Level, Level(inBuilding));
+        Assert.Null(Level(given));
+    }
+
+    [Fact]
     public async Task Placement_HeadingCalibration_AndSubtreeQuery()
     {
         var s = await SiteWithLevelAsync();

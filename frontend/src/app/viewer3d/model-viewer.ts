@@ -56,7 +56,7 @@ import { Message } from 'primeng/message';
 import { Select } from 'primeng/select';
 import { Tooltip } from 'primeng/tooltip';
 import { ApiService } from '../core/api/api.service';
-import { Anchor, GeoJsonGeometry, LevelInfo, ModelAsset, Place } from '../core/api/models';
+import { Anchor, GeoJsonGeometry, LevelInfo, MapLayer, ModelAsset, Place } from '../core/api/models';
 import { LocalPlane, SnapIndex, SnapResult } from '../core/geo/snap';
 import { Permissions } from '../core/auth/permissions';
 import { MESSAGES } from '../core/i18n/messages';
@@ -72,6 +72,7 @@ import {
 } from './box-math';
 import { handleAxis, handleCursor, handleIcon } from './handle-icons';
 import { PIN, placeIcon } from '../core/markers/marker-icons';
+import { GroundMap, groundable } from './ground-map';
 import { ModelsDialog } from './models-dialog';
 import { BoxImportDialog } from '../features/import/box-import-dialog';
 
@@ -138,6 +139,18 @@ type Tool = 'box' | 'point' | 'element';
           size="small"
           [pTooltip]="m.viewer3d.flyTo"
           (onClick)="flyHome()"
+        />
+        <!-- The background map laid flat under the model (only layers served in Web Mercator or WGS84). -->
+        <p-select
+          [options]="groundOptions()"
+          optionLabel="label"
+          optionValue="value"
+          [ngModel]="groundLayerId()"
+          (ngModelChange)="groundLayerId.set($event)"
+          size="small"
+          styleClass="ground-select"
+          appendTo="body"
+          [pTooltip]="m.viewer3d.groundHint"
         />
         <!-- Boxes, points and elements are placed on a model: without one the tools are not offered. -->
         @if (can.anchors() && readyModels().length > 0) {
@@ -335,6 +348,9 @@ type Tool = 'box' | 'point' | 'element';
     :host ::ng-deep .level-select {
       min-width: 11rem;
     }
+    :host ::ng-deep .ground-select {
+      max-width: 13rem;
+    }
     .snap {
       display: flex;
       align-items: center;
@@ -413,6 +429,24 @@ export class ModelViewer {
   /** One place per node; those only with a point or info-point place get a marker here (boxes and elements show themselves). */
   protected readonly places = signal<Place[]>([]);
   protected readonly snapTolerance = signal(DEFAULT_SNAP_M);
+  /** Background layers of the site; the one laid under the model (null: none). */
+  private readonly mapLayers = signal<MapLayer[]>([]);
+  protected readonly groundLayerId = signal<number | null>(null);
+  protected readonly groundOptions = computed(() => [
+    { label: this.m.viewer3d.noGround, value: null as number | null },
+    ...this.mapLayers()
+      .filter(groundable)
+      .map((l) => ({ label: l.name, value: l.id as number | null })),
+  ]);
+  private ground: GroundMap | null = null;
+  private readonly groundShown = effect(() => {
+    const layer = this.mapLayers().find((l) => l.id === this.groundLayerId()) ?? null;
+    const site = this.selection.site();
+    untracked(() => {
+      this.ground?.show(layer, site);
+      this.updateGlobe();
+    });
+  });
   protected readonly floorPartial = signal(false);
   protected readonly hasSegmented = computed(() =>
     this.models().some((x) => x.segmented && x.status === 'ready'),
@@ -566,6 +600,11 @@ export class ModelViewer {
       this.viewer;
     const scene = this.viewer.scene;
     scene.primitives.add(this.volumes);
+    this.ground = new GroundMap(this.viewer);
+    this.ground.show(
+      this.mapLayers().find((l) => l.id === this.groundLayerId()) ?? null,
+      this.selection.site(),
+    );
     void this.viewer.dataSources.add(this.snapLayer);
     // Without terrain the globe lies at the ellipsoid, far below the site's base height: hidden while models are shown.
     scene.backgroundColor = Color.fromCssColorString('#dde5ee');
@@ -604,6 +643,12 @@ export class ModelViewer {
     }
     this.loadModels();
     this.api.levels(siteId).subscribe((levels) => this.levels.set(levels));
+    // The ground map: the layer shown by default on the map, if it can lie flat.
+    this.api.mapLayers(siteId).subscribe((layers) => {
+      this.mapLayers.set(layers);
+      if (!layers.some((l) => l.id === this.groundLayerId()))
+        this.groundLayerId.set(layers.find((l) => l.visibleDefault && groundable(l))?.id ?? null);
+    });
     this.api
       .siteAnchors(siteId, 'model_feature')
       .subscribe((elements) => this.elements.set(elements));
@@ -639,14 +684,25 @@ export class ModelViewer {
     });
   }
 
+  /**
+   * The globe only without models and ground map: without terrain it lies at sea level, far below the site's base
+   * height (the ground map lies at that height instead).
+   */
+  private updateGlobe(): void {
+    if (!this.viewer) return;
+    const scene = this.viewer.scene;
+    const globe = this.tilesets.size === 0 && this.readyModels().length === 0 && !this.ground?.shown;
+    scene.globe.show = globe;
+    if (scene.skyBox) scene.skyBox.show = globe;
+    if (scene.skyAtmosphere) scene.skyAtmosphere.show = globe;
+  }
+
   private async showModels(models: ModelAsset[]): Promise<void> {
     if (!this.viewer) return;
     const scene = this.viewer.scene;
     for (const tileset of this.tilesets.values()) scene.primitives.remove(tileset);
     this.tilesets.clear();
-    scene.globe.show = models.length === 0;
-    if (scene.skyBox) scene.skyBox.show = models.length === 0;
-    if (scene.skyAtmosphere) scene.skyAtmosphere.show = models.length === 0;
+    this.updateGlobe();
     if (models.length === 0) return;
     // A fixed light from the south-west above: the model looks the same at any time of day.
     const site = this.selection.site();
