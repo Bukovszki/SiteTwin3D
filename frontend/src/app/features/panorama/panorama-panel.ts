@@ -15,7 +15,6 @@ import { MESSAGES } from '../../core/i18n/messages';
 import { SelectionService } from '../../core/selection/selection.service';
 import { MapToolsService } from '../map/map-tools.service';
 import { PanoramaClick, PanoramaViewer } from './panorama-viewer';
-import { PanoramaEditDialog } from './panorama-edit-dialog';
 import { PrivacyReviewDialog } from './privacy-review-dialog';
 
 const SHOW_BOXES_KEY = 'panorama.showBoxes';
@@ -34,7 +33,7 @@ function readShowBoxes(): boolean {
  */
 @Component({
   selector: 'app-panorama-panel',
-  imports: [Button, Message, Tag, Tooltip, PanoramaViewer, PrivacyReviewDialog, PanoramaEditDialog],
+  imports: [Button, Message, Tag, Tooltip, PanoramaViewer, PrivacyReviewDialog],
   template: `
     <div class="bar">
       @if (panorama(); as p) {
@@ -59,6 +58,14 @@ function readShowBoxes(): boolean {
           (onClick)="toggleBoxes()"
         />
         @if (can.anchors()) {
+          <!-- Its data (node, level, position) on the data sheet. -->
+          <p-button
+            icon="pi pi-pencil"
+            [text]="true"
+            size="small"
+            [pTooltip]="m.panorama.edit"
+            (onClick)="selection.focusPanorama(p.id)"
+          />
           <p-button
             icon="pi pi-map-marker"
             [text]="true"
@@ -78,13 +85,6 @@ function readShowBoxes(): boolean {
           />
         }
         @if (can.prepare()) {
-          <p-button
-            icon="pi pi-pencil"
-            [text]="true"
-            size="small"
-            [pTooltip]="m.panorama.edit"
-            (onClick)="editing.set(true)"
-          />
           <p-button
             icon="pi pi-share-alt"
             [text]="true"
@@ -158,7 +158,6 @@ function readShowBoxes(): boolean {
     @if (can.prepare() && panorama(); as p) {
       @defer {
         <app-privacy-review-dialog [(visible)]="reviewing" [panorama]="p" (changed)="reload()" />
-        <app-panorama-edit-dialog [(visible)]="editing" [panorama]="p" />
       }
     }
   `,
@@ -205,7 +204,6 @@ export class PanoramaPanel {
 
   protected readonly panorama = signal<Panorama | null>(null);
   protected readonly reviewing = signal(false);
-  protected readonly editing = signal(false);
   protected readonly hint = signal<string | null>(null);
   private calibrating: 'panorama' | 'map' | null = null;
   private placing = false;

@@ -398,7 +398,8 @@ export const MESSAGES_HU = {
     delete: 'Panoráma törlése',
     deleteConfirm: 'Biztosan törli a panorámát és a fájljait?',
     moved: 'A panoráma helye mentve',
-    edit: 'Panoráma adatai (kapcsolódó elem, szint, hely)',
+    edit: 'Panoráma adatai az adatlapon (kapcsolódó elem, szint, hely)',
+    statusLabel: 'Állapot',
     levelFollows: 'Másik elem választásakor a szint magától követi (a szint vagy a helyiség szintje); szükség esetén átírható.',
     saved: 'A panoráma adatai mentve',
     errors: {

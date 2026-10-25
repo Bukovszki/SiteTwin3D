@@ -15,6 +15,7 @@ import { AuthService } from '../../core/auth/auth.service';
 import { Permissions } from '../../core/auth/permissions';
 import { MESSAGES } from '../../core/i18n/messages';
 import { SelectionService } from '../../core/selection/selection.service';
+import { PanoramaSheet } from './panorama-sheet';
 import { SchemaForm } from './schema-form';
 
 /**
@@ -24,9 +25,11 @@ import { SchemaForm } from './schema-form';
  */
 @Component({
   selector: 'app-datasheet-panel',
-  imports: [FormsModule, KeyValuePipe, Button, InputText, Message, Select, Tag, SchemaForm],
+  imports: [FormsModule, KeyValuePipe, Button, InputText, Message, Select, Tag, SchemaForm, PanoramaSheet],
   template: `
-    @if (node(); as n) {
+    @if (selection.sheetPanoramaId(); as panoramaId) {
+      <app-panorama-sheet [panoramaId]="panoramaId" />
+    } @else if (node(); as n) {
       <div class="crumbs">
         @for (a of ancestors(); track a.id) {
           <a (click)="selection.focusNode(a.id)">{{ a.name }}</a

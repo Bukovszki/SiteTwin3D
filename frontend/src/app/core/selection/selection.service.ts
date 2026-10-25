@@ -33,6 +33,9 @@ export class SelectionService {
     fovDeg: number;
   } | null>(null);
 
+  /** A panorama shown on the data sheet (picked in the data tree); selecting a node takes the sheet back. */
+  readonly sheetPanoramaId = signal<number | null>(null);
+
   /** The middle pane: 2D map or 3D view (a model focused from the data tree switches to 3D). */
   readonly centerView = signal<'map' | 'globe'>('map');
   /** A model to bring into view in 3D (data tree); the tick repeats a focus on the same model. */
@@ -82,6 +85,7 @@ export class SelectionService {
     this.siteId.set(id);
     this.levelId.set(null);
     this.openPanorama(null);
+    this.sheetPanoramaId.set(null);
     this.modelFocus.set(null);
     this.selectNode(null);
   }
@@ -92,6 +96,7 @@ export class SelectionService {
   }
 
   selectNode(id: number | null): void {
+    if (id != null) this.sheetPanoramaId.set(null);
     if (id === this.nodeId()) return;
     this.nodeId.set(id);
     if (id == null) this.node.set(null);
@@ -106,6 +111,7 @@ export class SelectionService {
    * a panorama is open already – the view switches to one showing the node.
    */
   focusNode(id: number, openPanorama = false): void {
+    this.sheetPanoramaId.set(null);
     this.selectNode(id);
     this.focusTick.update((v) => v + 1);
     if (!openPanorama && this.panoramaId() == null) return;
@@ -129,6 +135,7 @@ export class SelectionService {
   focusPanorama(id: number): void {
     this.centerView.set('map');
     this.openPanorama(id);
+    this.sheetPanoramaId.set(id);
   }
 
   /** After a change: reload the views; optionally select a node (e.g. a newly created one). */

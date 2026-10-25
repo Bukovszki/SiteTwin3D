@@ -163,7 +163,7 @@ A rendszer a háttérben arcokat keres a képen. Amíg ez fut, a panoráma álla
 
 - **Tájolás kalibrálása** (iránytű ikon): kattintson egy jól azonosítható pontra (ajtó, sarok) a panorámán, majd ugyanarra az alaprajzon. Enélkül az infopontok iránya pontatlan lehet.
 - **Szomszédok automatikus összekötése (szint)**: a közeli panorámák között bejárási kapcsolatok jönnek létre. **Kapcsolat be/ki**: egy másik panorámára kattintva a kapcsolat kézzel kapcsolható.
-- **Panoráma adatai** (ceruza ikon a panoráma paneljén, Előkészítés): utólag átírható, melyik elemhez tartozik, melyik szinten van és hol készült (*Hely kijelölése az alaprajzon*). Másik elem választásakor a szint magától követi (pl. a földszint egy helyiségéhez kötve a földszint). Ugyanez történik, ha a panorámát az **Adatok** fában húzza át másik elemre.
+- **Panoráma adatai az adatlapon** (Előkészítés vagy Összerendelés): kattintson a panorámára az **Adatok** fában, vagy a panoráma paneljén a ceruza ikonra. Az adatlapon átírható, melyik elemhez tartozik (*Kapcsolódó elem*), melyik szinten van és hol készült (*Hely kijelölése az alaprajzon*) → **Mentés**. Másik elem választásakor a szint magától követi (pl. a földszint egy helyiségéhez kötve a földszint). Előkészítésben a panoráma az **Adatok** fában át is húzható másik elemre – a szint ugyanígy követi. Egy elemre kattintva az adatlap újra az elemet mutatja.
 
 ### 6. 3D adatok
 
