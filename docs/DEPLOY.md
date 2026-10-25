@@ -4,14 +4,14 @@ Lépésről lépésre egy friss **Ubuntu 24.04** szerver előkészítése és a 
 
 > Az operációs rendszer a **sima Ubuntu 24.04** legyen, ne a cPaneles változat: a cPanel saját webszervere elfoglalná a 80/443-as portot, és nem támogatja a Dockert.
 
-> **Ha a MapManager is erre a szerverre kerül:** mindkét rendszer a 80/443-as portot használná, ezért egy közös belépési pont kell, amely a domain alapján osztja szét a kéréseket. Ennek leírása külön készül; addig ez a leírás egy szerveren egyedül futó telepítést ír le. Közös szervernél a `CONVERTER_MEMORY` legyen `4g` (a GeoServernek is kell memória).
+> **Ha a MapManager is erre a szerverre kerül:** az 1–6. lépés ugyanaz; utána a [12. fejezet](#12-közös-szerver-a-mapmanagerrel) szerint folytasd (a 7–8. lépés helyett).
 
 **Amire szükség lesz**
 
 | Mi | Példa |
 |---|---|
 | a szerver nyilvános IP-címe (Contabo ügyfélpanel / visszaigazoló e-mail) | `203.0.113.10` |
-| egy domainnév, amelynek DNS-ét kezelheted | `twin.ceg.hu` |
+| egy név a szervernek: saját domain, vagy domain nélkül az ingyenes [sslip.io](#név-domain-nélkül-sslipio) | `twin.ceg.hu` |
 | e-mail-cím a tanúsítványértesítésekhez | `it@ceg.hu` |
 | hozzáférés a GitHub-repóhoz | `github.com/Bukovszki/SiteTwin3D` |
 
@@ -28,6 +28,7 @@ A lépések sorrendje:
 9. [Első belépés a felületre, szervezet, MapManager](#9-első-belépés-a-felületre)
 10. [Mentés ütemezése](#10-mentés-ütemezése)
 11. [Frissítés később](#11-frissítés)
+12. [Közös szerver a MapManagerrel](#12-közös-szerver-a-mapmanagerrel) – és az adatok átköltöztetése
 
 ---
 
@@ -214,6 +215,17 @@ nslookup twin.ceg.hu      # → 203.0.113.10
 
 A HTTPS-tanúsítványt a rendszer magától kéri (Let's Encrypt) az első indításkor – ehhez a domainnek már a szerverre kell mutatnia, és a 80-as portnak nyitva kell lennie.
 
+### Név domain nélkül: sslip.io
+
+Teszt- és demószerverhez nem kell domaint venni: az ingyenes **sslip.io** szolgáltatásnál minden név, amelyben benne van az IP-cím (pontok helyett kötőjellel), magától arra az IP-re mutat – regisztráció és DNS-beállítás nélkül, és HTTPS-tanúsítvány is kérhető rá. A `203.0.113.10` IP-hez:
+
+| Alkalmazás | Név |
+|---|---|
+| ez a rendszer | `sitetwin3d.203-0-113-10.sslip.io` |
+| MapManager | `mapmanager.203-0-113-10.sslip.io` |
+
+Ellenőrzés: `nslookup sitetwin3d.203-0-113-10.sslip.io` → `203.0.113.10`. Később saját domainre átállni a `.env`-ben a `DOMAIN` és a `PUBLIC_URL` átírása és egy újraindítás (`docker compose up -d`).
+
 ## 6. A kód letöltése (GitHub deploy key)
 
 Ha a repó **privát**, a szerver egy saját, csak olvasási jogú kulccsal (deploy key) éri el – így a szerveren nincs személyes GitHub-hozzáférés.
@@ -337,6 +349,132 @@ Az API induláskor lefuttatja az adatbázis-migrációkat. Ha valami nem működ
 
 ---
 
+---
+
+## 12. Közös szerver a MapManagerrel
+
+A két rendszer egy szerveren, saját néven fut (pl. `sitetwin3d.203-0-113-10.sslip.io` és `mapmanager.203-0-113-10.sslip.io`). Mivel mindkettő a 80/443-as portot használná, egy kis **közös belépési pont** (nginx, `deploy/edge`) kapja meg a portokat, és a kért név alapján adja tovább a kapcsolatot a megfelelő alkalmazás saját webszerverének. A titkosított kapcsolatot nem bontja ki, így mindkét alkalmazás a saját HTTPS-tanúsítványával és beállításaival, változatlanul fut. A `mapmanager.`-rel kezdődő nevek a MapManagerhez, minden más ehhez a rendszerhez kerül.
+
+```
+internet ─80/443─▶ edge (nginx) ─┬─ sitetwin3d.… ─▶ ez a rendszer (Caddy + API + …)
+                                 └─ mapmanager.… ─▶ MapManager (Caddy + API + GeoServer + …)
+```
+
+A MapManager repóját ehhez nem kell módosítani: a kiegészítő compose-fájlja ebben a repóban van (`deploy/edge/mapmanager.yml`), és a MapManager `.env`-jében egy sor kapcsolja be. Így a MapManager saját szkriptjei (`update.sh`, `backup.sh`) is ezzel futnak.
+
+**Memória (12 GB):** ebben a rendszerben `CONVERTER_MEMORY=4g`; a MapManager GeoServere alapból 1 GB-os (`GEOSERVER_MAX_HEAP`), ez demóhoz elég.
+
+### 12.1 A belépési pont
+
+Az 1–6. lépés után (a kód a `/opt/app` alatt van):
+
+```bash
+cd /opt/app/deploy/edge
+docker compose up -d          # létrehozza az "edge" hálózatot is
+docker compose ps
+```
+
+### 12.2 Ez a rendszer
+
+A [7. lépés](#7-beállítások-env) szerint, ezekkel az eltérésekkel a `deploy/.env`-ben:
+
+```ini
+DOMAIN=sitetwin3d.203-0-113-10.sslip.io
+PUBLIC_URL=https://sitetwin3d.203-0-113-10.sslip.io
+CONVERTER_MEMORY=4g
+# a belépési pont mögött: a webszerver nem foglal portot, az "edge" hálózaton érhető el
+COMPOSE_FILE=docker-compose.yml:edge/twin.yml
+```
+
+```bash
+cd /opt/app/deploy
+docker compose up -d --build
+curl https://sitetwin3d.203-0-113-10.sslip.io/health      # → Healthy
+```
+
+### 12.3 MapManager
+
+A MapManager külön repó, ezért **külön deploy key** kell hozzá (a GitHub egy kulcsot csak egy repóhoz enged):
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/github_mapmanager -C "twin szerver MapManager deploy key" -N ""
+cat >> ~/.ssh/config <<'EOF'
+Host github-mapmanager
+    HostName github.com
+    IdentityFile ~/.ssh/github_mapmanager
+    IdentitiesOnly yes
+EOF
+cat ~/.ssh/github_mapmanager.pub     # → GitHub: MapManager repó → Settings → Deploy keys → Add deploy key (csak olvasás)
+
+sudo mkdir -p /opt/mapmanager && sudo chown deploy:deploy /opt/mapmanager
+git clone git@github-mapmanager:Bukovszki/MapManager.git /opt/mapmanager
+cd /opt/mapmanager/deploy
+cp .env.example .env && chmod 600 .env && nano .env
+```
+
+A MapManager `.env`-jében ezek az eltérések; a többi értéket a MapManager telepítési leírása (`deploy/README.md` a MapManager repójában) szerint kell kitölteni, a jelszavakat `openssl rand -base64 24`-gyel:
+
+```ini
+DOMAIN=mapmanager.203-0-113-10.sslip.io
+ACME_EMAIL=it@ceg.hu
+# a belépési pont mögött (a kiegészítő fájl ennek a rendszernek a repójában van)
+COMPOSE_FILE=docker-compose.yml:/opt/app/deploy/edge/mapmanager.yml
+```
+
+```bash
+docker compose up -d --build
+docker compose logs -f api        # első indítás: migrációk, platform-admin
+```
+
+A MapManager tűzfalszkriptje (`firewall.sh`) ugyanazokat a portokat nyitja (22, 80, 443); a 3. lépés után nem kell futtatni.
+
+### 12.4 A két rendszer összekötése
+
+1. MapManager (`https://mapmanager.203-0-113-10.sslip.io`): platform-admin → cég létrehozása, rétegek publikálása; a szolgáltatástoken kiadása a MapManager leírása szerint.
+2. Ez a rendszer (`https://sitetwin3d.203-0-113-10.sslip.io`): platform-admin → **Szervezetek** → a szervezet **MapManager címe**: `https://mapmanager.203-0-113-10.sslip.io`, **szolgáltatástoken hivatkozása**: pl. `ceg`.
+3. A token a szerveren, a gitből kizárt fájlba:
+
+   ```bash
+   cd /opt/app/deploy
+   echo 'MapManager__Tokens__ceg=mmst_…' >> api.env && chmod 600 api.env
+   docker compose up -d api
+   ```
+
+### 12.5 Mentés, frissítés
+
+- **Mentés:** mindkét rendszer a saját szkriptjével, két cron-sorral (`crontab -e`):
+
+  ```cron
+  0 2 * * * cd /opt/app/deploy && ./backup.sh >> backups/backup.log 2>&1
+  30 2 * * * cd /opt/mapmanager/deploy && ./backup.sh >> backups/backup.log 2>&1
+  ```
+
+- **Frissítés:** ez a rendszer a [11. lépés](#11-frissítés) szerint, a MapManager a saját `update.sh`-jával. A `COMPOSE_FILE` miatt mindkettő a belépési pont mögött marad. A belépési pont ritkán változik: `cd /opt/app/deploy/edge && docker compose pull && docker compose up -d`.
+- **Naplók:** a belépési pont mögött az alkalmazások naplójában az ügyfél IP-címe helyett a belépési pont belső címe látszik, mert a titkosított kapcsolatot nem bontja ki.
+
+### 12.6 Adatok átköltöztetése egy másik szerverről
+
+Az új szerveren előbb indítsd el üresen mindkét rendszert (12.1–12.3), utána:
+
+**Ez a rendszer:** a régi szerveren mentés, átvitel, az újon visszaállítás.
+
+```bash
+# régi szerveren
+cd <régi telepítés>/deploy && ./backup.sh
+# a mentés (adatbázis + fájlok) átvitele az új szerverre, pl. a saját gépedről
+rsync -az regi:<régi telepítés>/deploy/backups/ twin:/opt/app/deploy/backups/
+# új szerveren
+cd /opt/app/deploy && ./restore.sh backups/db/appdb-<időbélyeg>.dump
+```
+
+A visszaállítás után a felhasználóknak újra be kell lépniük. Ha a MapManager címe változott, a szervezet **MapManager címét** írd át, és a tokent tedd az `api.env`-be (12.4).
+
+**MapManager:** a saját mentésével (`backup.sh`: adatbázis, GeoServer-adatok, feltöltések), visszaállítás a MapManager leírásának „Visszaállítás” része szerint (`pg_restore`, majd a `geoserver_data`, `uploads`, `dpkeys` kötetek). A rétegek nevei a mentéssel együtt jönnek, így ennek a rendszernek a réteg- és alaprajz-hivatkozásai érvényesek maradnak.
+
+> Átköltöztetés előtt mindkét rendszerből készüljön friss mentés a régi szerveren, és az új szerveren egy próbabelépéssel ellenőrizd az adatokat, mielőtt a régit leállítod.
+
+---
+
 ## Ellenőrzőlista
 
 - [ ] SSH csak kulccsal, root-belépés tiltva (`sudo sshd -T | grep -E 'permitrootlogin|passwordauthentication'`)
@@ -345,3 +483,4 @@ Az API induláskor lefuttatja az adatbázis-migrációkat. Ha valami nem működ
 - [ ] platform-admin jelszava lecserélve, a `.env` elmentve jelszókezelőbe
 - [ ] napi mentés cronban, a mentések rendszeresen másik gépre kerülnek
 - [ ] egy próba-visszaállítás megtörtént (negyedévente ismételni)
+- [ ] közös szervernél: mindkét név `https://`-sel betölt, és mindkettő a saját tanúsítványát mutatja

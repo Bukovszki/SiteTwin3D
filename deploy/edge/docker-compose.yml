@@ -1,0 +1,35 @@
+# Shared entry point when several applications run on one server, each under its own host name (this one and
+# MapManager): nginx takes ports 80 and 443 and hands every connection to that application's own web server by the
+# host name – HTTPS by the TLS server name (SNI) without opening it, HTTP by the Host header. So every application
+# keeps its own Caddy, certificate (Let's Encrypt works through it) and settings unchanged. Guide: docs/DEPLOY.md.
+#   docker compose up -d          (from deploy/edge; it creates the "edge" network the applications join)
+name: edge
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "3"
+
+services:
+  edge:
+    logging: *logging
+    image: docker.io/library/nginx:1.27.5-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf.in:ro
+    # The configuration with the container's DNS server filled in (it resolves the applications' names).
+    command:
+      - sh
+      - -c
+      - >-
+        sed "s/__RESOLVER__/$$(awk '/^nameserver/ {print $$2; exit}' /etc/resolv.conf)/g"
+        /etc/nginx/nginx.conf.in > /etc/nginx/nginx.conf && exec nginx -g 'daemon off;'
+    networks: [edge]
+
+networks:
+  edge:
+    name: edge

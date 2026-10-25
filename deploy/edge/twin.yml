@@ -1,0 +1,14 @@
+# This application behind the shared entry point (deploy/edge): its web server publishes no port, it is reached on
+# the "edge" network as twin-web. Switched on in deploy/.env:  COMPOSE_FILE=docker-compose.yml:edge/twin.yml
+services:
+  web:
+    ports: !reset []
+    networks:
+      frontend: {}
+      edge:
+        aliases: [twin-web]
+
+networks:
+  edge:
+    external: true
+    name: edge

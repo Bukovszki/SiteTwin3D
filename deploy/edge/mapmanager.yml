@@ -1,0 +1,15 @@
+# MapManager behind the shared entry point (deploy/edge), without changing the MapManager repository: its web server
+# publishes no port, it is reached on the "edge" network as mapmanager-web. Switched on in MapManager's deploy/.env
+# (path of this repository on the server):  COMPOSE_FILE=docker-compose.yml:/opt/app/deploy/edge/mapmanager.yml
+services:
+  web:
+    ports: !reset []
+    networks:
+      frontend: {}
+      edge:
+        aliases: [mapmanager-web]
+
+networks:
+  edge:
+    external: true
+    name: edge

@@ -11,6 +11,7 @@ Ez a leírás a rendszer egy szerveres, Docker Compose alapú telepítésének �
 | `db` (PostgreSQL + PostGIS) | adatbázis (`pgdata` kötet) | nem |
 | `storage` (SeaweedFS, S3) | panorámák, 3D modellek (`storage` kötet) | csak aláírt URL-lel, a `web`-en át |
 | `converter` (Python) | IFC, mesh (OBJ, FBX …) és pontfelhő (LAS, LAZ, E57) átalakítása 3D megjelenítésre | nem |
+| `edge` (nginx, csak közös szervernél) | a 80/443 a név alapján a két alkalmazás (ez a rendszer és a MapManager) webszerveréhez; `deploy/edge`, [DEPLOY.md, 12.](DEPLOY.md#12-közös-szerver-a-mapmanagerrel) | igen (80, 443) |
 
 A bináris tartalom (panoráma, modell) soha nem kerül az adatbázisba; a böngésző rövid lejáratú aláírt URL-lel éri el az objektumtárat. Ezért **a mentéshez az adatbázist és az objektumtárat is menteni kell** (3. fejezet).
 

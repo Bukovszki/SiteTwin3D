@@ -23,7 +23,7 @@ backend/     ← .NET API (src/Api, tests/Api.Tests; Backend.slnx)
 frontend/    ← Angular kliens (zoneless; a Cesium lusta betöltésű, viewer3d/)
 converter/   ← modellkonverter (Python: IFC → szegmentált GLB, mesh → GLB, LAS/LAZ/E57 → 3D Tiles), belső szolgáltatás
 db/sql/      ← migrációk által futtatott SQL (triggerek, alaptípusok); beágyazott erőforrás, `SqlScripts.Load`
-deploy/      ← docker-compose.yml, .env.example, Caddyfile, backup.sh / restore.sh
+deploy/      ← docker-compose.yml, .env.example, Caddyfile, backup.sh / restore.sh; edge/ = közös belépési pont (nginx, név szerinti TLS-továbbítás) a MapManagerrel közös szerverhez
 docs/        ← SPECIFICATION.md, MAPMANAGER_EXTENSIONS.md, OPERATIONS.md (üzemeltetés), DEPLOY.md (új szerver: Ubuntu 24.04), USER_GUIDE.md (felhasználói kézikönyv, képei: docs/images/)
 ```
 - Objektumtár: S3-kompatibilis; alapból **SeaweedFS** (a MinIO nem ad ki szabad konténerképet). A backend csak S3-at beszél, a tár cserélhető.
