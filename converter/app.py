@@ -28,6 +28,7 @@ import archive
 import ifc
 import mesh
 import pointcloud
+from messages import msg
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("converter")
@@ -48,7 +49,7 @@ CONTENT_TYPES = {".glb": "model/gltf-binary", ".json": "application/json", ".pnt
 def run(job: dict) -> dict:
     main, prefix, kind = job["main"], job["outputPrefix"], job["format"]
     if not prefix.endswith("/") or ".." in prefix or not main.startswith(prefix.rsplit("/", 2)[0]):
-        raise ValueError("Invalid job.")
+        raise ValueError(msg("invalid_job"))
     work = tempfile.mkdtemp(prefix="convert-")
     try:
         source_root = os.path.join(work, "src")
@@ -107,7 +108,7 @@ def convert_one(kind: str, source: str, out: str, prefix: str, srs: str | None, 
         result = {"kind": "3dtiles", "segmented": False, "georeferenced": True, "placement": None, "warnings": [],
                   "key": prefix + "tileset.json"}
     else:
-        raise ValueError(f"Unknown format: {kind}")
+        raise ValueError(msg("unknown_format", kind))
     return result
 
 
@@ -150,7 +151,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(422, {"error": str(e)})
         except Exception as e:  # noqa: BLE001 – reported to the API, logged here
             log.error("conversion failed: %s\n%s", e, traceback.format_exc())
-            self._send(422, {"error": f"Conversion failed: {e}"})
+            self._send(422, {"error": msg("failed", e)})
 
     def log_message(self, format: str, *args) -> None:  # noqa: A002 – requests are logged in do_POST
         pass

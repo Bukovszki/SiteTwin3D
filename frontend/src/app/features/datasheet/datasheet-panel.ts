@@ -163,7 +163,7 @@ import { SchemaForm } from './schema-form';
               <span class="muted">{{ m.location.none }}</span>
             }
           </div>
-          @if (can.prepare()) {
+          @if (can.anchors()) {
             <p-select
               inputId="ds-location"
               [options]="places()"
@@ -230,7 +230,7 @@ import { SchemaForm } from './schema-form';
                 [text]="true"
                 size="small"
                 severity="danger"
-                [ariaLabel]="m.infoPoint.delete"
+                [ariaLabel]="m.infoPoint.deleteKind(m.infoPoint.kinds[a.kind])"
                 (onClick)="deleteAnchor(a)"
               />
             }
@@ -475,7 +475,6 @@ export class DatasheetPanel {
   protected readonly type = computed(() => this.selection.typeOf(this.node()?.typeId));
   /** Places of the location tree (breadcrumb labels), for the explicit located_in. */
   private readonly locationNodes = signal<Node[]>([]);
-  private locationSite: number | null = null;
   protected readonly places = computed(() => {
     const byId = new Map(this.locationNodes().map((n) => [n.id, n]));
     return this.locationNodes()
@@ -522,10 +521,9 @@ export class DatasheetPanel {
       error: () => this.selection.selectNode(null),
     });
     const siteId = this.selection.siteId();
-    if (siteId != null && this.can.prepare() && this.locationSite !== siteId) {
-      this.locationSite = siteId;
+    // The places offered: read again on every change (a room created since then must be in the list).
+    if (siteId != null && this.can.anchors())
       this.api.tree(siteId, 'location').subscribe((nodes) => this.locationNodes.set(nodes));
-    }
   }
 
   protected setLocation(locationId: number | null): void {

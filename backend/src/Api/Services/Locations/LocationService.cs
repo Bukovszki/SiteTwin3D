@@ -111,11 +111,16 @@ public class LocationService(AppDbContext db, CurrentUser currentUser)
         var names = await db.Nodes.AsNoTracking().Where(n => ancestorIds.Contains(n.Id)).ToDictionaryAsync(n => n.Id, n => n.Name, ct);
         List<string> Breadcrumb(Node place) => place.Path.ToString().Split('.').Select(long.Parse).Select(id => names.GetValueOrDefault(id, "?")).ToList();
 
+        // Without an anchor on a level: the level above in the hierarchy (a room's, or the place's of an equipment).
+        long? LevelAbove(Node? n) => n?.Path.ToString().Split('.').Select(long.Parse).Reverse().Where(elevation.ContainsKey)
+            .Select(id => (long?)id).FirstOrDefault();
+
         var result = new Dictionary<long, (LocationRef?, long?, string?)>();
         foreach (var node in nodes)
         {
             LocationRef? location = null;
             var related = relations.Where(r => r.FromId == node.Id).Select(r => r.Location).OrderByDescending(n => NodeService.Depth(n.Path)).FirstOrDefault();
+            var place = related;
             if (related is not null) location = new LocationRef(related.Id, related.Name, Breadcrumb(related), LocationSources.Relation);
             else
             {
@@ -125,8 +130,10 @@ public class LocationService(AppDbContext db, CurrentUser currentUser)
                     .Select(s => s.Location)
                     .FirstOrDefault();
                 if (hit is not null) location = new LocationRef(hit.Id, hit.Name, Breadcrumb(hit), LocationSources.Box);
+                place = hit;
             }
-            var levelId = points[node.Id].Select(p => p.LevelId).FirstOrDefault(l => l is not null);
+            var levelId = points[node.Id].Select(p => p.LevelId).FirstOrDefault(l => l is not null)
+                ?? LevelAbove(place) ?? (node.Type.Aspect == "location" ? LevelAbove(node) : null);
             result[node.Id] = (location, levelId, levelId is { } l ? levels.FirstOrDefault(x => x.Id == l)?.Name : null);
         }
         return result;

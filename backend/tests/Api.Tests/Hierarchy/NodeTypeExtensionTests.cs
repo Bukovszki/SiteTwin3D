@@ -39,10 +39,10 @@ public sealed class NodeTypeExtensionTests(PostgisFixture postgis) : ApiTestBase
     {
         var org = await Api.NewOrganizationAsync();
         var site = await org.Http.CreateSiteAsync();
-        var room = await org.Http.TypeIdAsync("room");
+        var room = await org.Http.TypeIdAsync("outdoor_area");
 
         var set = await SetFieldsAsync(org, room, RoomFields());
-        var type = await TypeAsync(org, "room");
+        var type = await TypeAsync(org, "outdoor_area");
         var valid = await org.Http.PostNodeAsync(site, null, room, "Gépterem", new { floor_area_m2 = 42.5, finish = "epoxi" });
         var missing = await org.Http.PostNodeAsync(site, null, room, "Raktár", new { finish = "beton" });
         var wrong = await org.Http.PostNodeAsync(site, null, room, "Iroda", new { floor_area_m2 = 12, finish = "parketta" });
@@ -94,13 +94,13 @@ public sealed class NodeTypeExtensionTests(PostgisFixture postgis) : ApiTestBase
         var org = await Api.NewOrganizationAsync();
         var other = await Api.NewOrganizationAsync();
         var site = await org.Http.CreateSiteAsync();
-        var room = await org.Http.TypeIdAsync("room");
+        var room = await org.Http.TypeIdAsync("outdoor_area");
         await SetFieldsAsync(org, room, RoomFields(withFinish: false));
         var node = await org.Http.CreateNodeAsync(site, null, room, "Gépterem", new { floor_area_m2 = 30 });
 
-        var othersRoom = await TypeAsync(other, "room");
+        var othersRoom = await TypeAsync(other, "outdoor_area");
         var removed = await SetFieldsAsync(org, room, null);
-        var afterRemoval = await TypeAsync(org, "room");
+        var afterRemoval = await TypeAsync(org, "outdoor_area");
         var stored = await org.Http.GetFromJsonAsync<JsonElement>($"/api/v1/nodes/{node.GetProperty("id").GetInt64()}");
 
         Assert.Equal(JsonValueKind.Null, othersRoom.GetProperty("attrSchema").ValueKind);

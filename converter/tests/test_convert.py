@@ -167,7 +167,7 @@ def test_zip(work: str) -> None:
     result = convert_zip(work, "objzip")
     assert result["format"] == "mesh" and result["kind"] == "gltf", result
     assert embedded_images(result["glb"]) == ["image/png"], result
-    assert not any("Missing texture" in w for w in result["warnings"]), result["warnings"]
+    assert not any(w.startswith("textures_missing") for w in result["warnings"]), result["warnings"]
 
     # FBX (exported by Assimp from the cube) with its texture next to it in another folder of the ZIP.
     fbx_source = os.path.join(work, "fbx-src")
@@ -191,7 +191,7 @@ def test_zip(work: str) -> None:
         archive.extract(evil, os.path.join(work, "evil-unpacked"))
         raise AssertionError("unsafe ZIP accepted")
     except ValueError as e:
-        assert "Unsafe path" in str(e), e
+        assert str(e).startswith("zip_unsafe_path"), e
     print("zip ok: unsafe path refused")
 
 

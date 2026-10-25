@@ -7,6 +7,7 @@ import { Dialog } from 'primeng/dialog';
 import { InputNumber } from 'primeng/inputnumber';
 import { InputText } from 'primeng/inputtext';
 import { Message } from 'primeng/message';
+import { MultiSelect } from 'primeng/multiselect';
 import { Select } from 'primeng/select';
 import { Tag } from 'primeng/tag';
 import { Textarea } from 'primeng/textarea';
@@ -43,6 +44,7 @@ type Editing = { kind: 'none' } | { kind: 'new' } | { kind: 'type'; type: NodeTy
     InputNumber,
     InputText,
     Message,
+    MultiSelect,
     Select,
     Tag,
     Textarea,
@@ -177,6 +179,28 @@ type Editing = { kind: 'none' } | { kind: 'new' } | { kind: 'type'; type: NodeTy
                     </ul>
                   }
                 }
+              }
+
+              <!-- Where records of the type may be in the tree (an own type: set here; a shared one: fixed). -->
+              @if (current()?.shared) {
+                <p class="muted">{{ m.types.parents }}: {{ parentsText(current()!) }}</p>
+              } @else {
+                <div class="field">
+                  <label for="ty-parents">{{ m.types.parents }}</label>
+                  <p-multiselect
+                    inputId="ty-parents"
+                    [options]="parentOptions()"
+                    optionLabel="label"
+                    optionValue="value"
+                    [ngModel]="parents()"
+                    (ngModelChange)="parents.set($event); dirty.set(true)"
+                    [placeholder]="m.types.anywhere"
+                    display="chip"
+                    appendTo="body"
+                    fluid
+                  />
+                  <small class="muted">{{ m.types.parentsHint }}</small>
+                </div>
               }
 
               <h5>{{ current()?.shared ? m.types.ownFields : m.types.fields }}</h5>
@@ -453,6 +477,8 @@ export class TypesDialog {
   protected readonly code = signal('');
   protected readonly aspect = signal<'location' | 'function'>('location');
   protected readonly isLevel = signal(false);
+  /** Allowed parent type codes ('' = top of the tree); empty: anywhere. */
+  protected readonly parents = signal<string[]>([]);
   protected readonly dirty = signal(false);
   protected readonly saving = signal(false);
 
@@ -501,6 +527,29 @@ export class TypesDialog {
       });
   });
 
+  /** The top of the tree and the types of the same tree (the type itself too: e.g. a zone in a zone). */
+  protected readonly parentOptions = computed(() => {
+    const own = this.current();
+    const code = own?.code ?? this.code();
+    const aspect = own?.aspect ?? this.aspect();
+    return [
+      { label: this.m.types.top, value: '' },
+      ...this.selection
+        .nodeTypes()
+        .filter((t) => t.aspect === aspect && t.code !== code)
+        .map((t) => ({ label: t.name, value: t.code })),
+      ...(code ? [{ label: this.m.types.itself, value: code }] : []),
+    ];
+  });
+
+  protected parentsText(t: NodeType): string {
+    if (!t.allowedParents) return this.m.types.anywhere;
+    const names = new Map(this.selection.nodeTypes().map((x) => [x.code, x.name]));
+    return t.allowedParents
+      .map((p) => (p === '' ? this.m.types.top : p === t.code ? this.m.types.itself : (names.get(p) ?? p)))
+      .join(', ');
+  }
+
   protected fieldCount(t: NodeType): number {
     return Object.keys(t.attrSchema?.properties ?? {}).length;
   }
@@ -526,6 +575,7 @@ export class TypesDialog {
       this.code.set('');
       this.aspect.set(type?.aspect ?? 'location');
       this.isLevel.set(false);
+      this.parents.set(type?.allowedParents ?? []);
       this.dirty.set(false);
     };
     if (!this.dirty()) {
@@ -612,12 +662,17 @@ export class TypesDialog {
         aspect: this.aspect(),
         isLevel: this.aspect() === 'location' && this.isLevel(),
         attrSchema: schema,
+        allowedParents: this.parents().length ? this.parents() : null,
       });
     else {
       const type = this.current()!;
       request = type.shared
         ? this.api.setNodeTypeExtension(type.id, schema)
-        : this.api.updateNodeType(type.id, { name: this.name().trim(), attrSchema: schema });
+        : this.api.updateNodeType(type.id, {
+            name: this.name().trim(),
+            attrSchema: schema,
+            allowedParents: this.parents().length ? this.parents() : null,
+          });
     }
     this.saving.set(true);
     request.subscribe({

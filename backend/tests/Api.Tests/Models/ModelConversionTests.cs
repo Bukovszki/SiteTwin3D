@@ -94,7 +94,7 @@ public sealed class ModelConversionTests(PostgisFixture postgis) : ApiTestBase(p
         {
             ["kind"] = "gltf", ["key"] = job.GetProperty("outputPrefix").GetString() + "model.glb", ["segmented"] = false,
             ["format"] = "mesh", ["main"] = "Szivattyuhaz/pump.fbx",
-            ["warnings"] = new JsonArray("Missing texture(s), shown grey: rust.tga"),
+            ["warnings"] = new JsonArray("textures_missing:rust.tga"),
         };
 
         // No placement needed up front (an IFC or a point cloud in it may place itself); a mesh goes to the site point.
@@ -115,7 +115,7 @@ public sealed class ModelConversionTests(PostgisFixture postgis) : ApiTestBase(p
         Assert.Equal("szivattyuhaz.zip › Szivattyuhaz/pump.fbx", conversion.GetProperty("source").GetString());
         Assert.Equal(19.04, model.GetProperty("placement").GetProperty("lon").GetDouble(), 6); // the site point
         var warnings = conversion.GetProperty("warnings").EnumerateArray().Select(w => w.GetString()).ToList();
-        Assert.Contains("Missing texture(s), shown grey: rust.tga", warnings);
+        Assert.Contains("textures_missing:rust.tga", warnings);
     }
 
     [Fact]
@@ -136,7 +136,7 @@ public sealed class ModelConversionTests(PostgisFixture postgis) : ApiTestBase(p
         Assert.Equal("mesh", job.GetProperty("format").GetString());
         Assert.Equal(3, job.GetProperty("keys").GetArrayLength()); // the MTL and the texture go with it
         Assert.Equal("failed", model.GetProperty("status").GetString());
-        Assert.Equal("The model could not be read.", model.GetProperty("processingError").GetString());
+        Assert.Equal("unreadable", model.GetProperty("processingError").GetString());
     }
 
     [Fact]

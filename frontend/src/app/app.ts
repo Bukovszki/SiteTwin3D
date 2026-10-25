@@ -15,7 +15,8 @@ import { PlatformScreen } from './features/platform/platform-screen';
   imports: [RouterOutlet, Toast, ConfirmDialog, LoginScreen, PlatformScreen, ChangeReasonDialog],
   selector: 'app-root',
   template: `
-    <p-toast position="bottom-right" />
+    <!-- Bottom left: the data sheet (right) keeps its Save button free, the map keeps its tool hint (bottom centre). -->
+    <p-toast position="bottom-left" />
     <p-confirmdialog [style]="{ width: '28rem' }" />
     <app-change-reason-dialog />
     @if (!auth.checked()) {

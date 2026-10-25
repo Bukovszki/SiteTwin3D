@@ -155,7 +155,7 @@ interface PendingFile {
                   <p-tag
                     severity="danger"
                     [value]="m.models.failed"
-                    [title]="x.processingError ?? ''"
+                    [title]="m.models.message(x.processingError)"
                   />
                 }
                 @default {

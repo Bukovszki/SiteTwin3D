@@ -57,41 +57,48 @@ const CONE_LENGTH_M = 8;
   imports: [FormsModule, Button, Checkbox, Message, Select, Tooltip, PanoramaUploadDialog, FloorplansDialog, DrawPanel, MapLegend],
   template: `
     <div #map class="map"></div>
-    @if (selection.siteId() != null) {
-      <div class="level-bar">
-        <p-select [options]="levelOptions()" optionLabel="label" optionValue="value" [ngModel]="selection.levelId()"
-          (ngModelChange)="selection.levelId.set($event)" size="small" styleClass="level-select" appendTo="body" />
-        @if (can.prepare()) {
-          @if (selection.levelId() != null) {
-            <p-button icon="pi pi-images" [text]="true" size="small" [pTooltip]="m.levels.manage" (onClick)="floorplansOpen.set(true)" />
+    <!-- The toolbar and the layer list share the top: on a narrow map the list wraps below the toolbar. -->
+    <div class="top-dock">
+      @if (selection.siteId() != null) {
+        <div class="level-bar">
+          <p-select [options]="levelOptions()" optionLabel="label" optionValue="value" [ngModel]="selection.levelId()"
+            (ngModelChange)="selection.levelId.set($event)" size="small" styleClass="level-select" appendTo="body" />
+          @if (can.prepare()) {
+            @if (selection.levelId() != null) {
+              <p-button icon="pi pi-images" [text]="true" size="small" [pTooltip]="m.levels.manage" (onClick)="floorplansOpen.set(true)" />
+            }
+            <p-button icon="pi pi-camera" [text]="true" size="small" [pTooltip]="m.panorama.upload" (onClick)="uploadOpen.set(true)" />
           }
-          <p-button icon="pi pi-camera" [text]="true" size="small" [pTooltip]="m.panorama.upload" (onClick)="uploadOpen.set(true)" />
-        }
-        @if (can.anchors()) {
-          <p-button icon="pi pi-map-marker" [text]="true" size="small" [disabled]="selection.nodeId() == null"
-            [pTooltip]="selection.node() ? m.mapPoint.place(selection.node()!.name) : m.mapPoint.needNode" (onClick)="placePoint()" />
-          <p-button icon="pi pi-arrows-alt" [text]="!edits.active()" [outlined]="edits.active()" size="small"
-            [pTooltip]="edits.active() ? m.anchorEdit.stop : m.anchorEdit.start" (onClick)="edits.toggle()" />
-        }
-        <p-button icon="pi pi-pencil" [text]="true" size="small" [pTooltip]="m.drawing.layers" (onClick)="drawingOpen.set(!drawingOpen())" />
-      </div>
+          @if (can.anchors()) {
+            <p-button icon="pi pi-map-marker" [text]="true" size="small" [disabled]="selection.nodeId() == null"
+              [pTooltip]="selection.node() ? m.mapPoint.place(selection.node()!.name) : m.mapPoint.needNode" (onClick)="placePoint()" />
+            <p-button icon="pi pi-arrows-alt" [text]="!edits.active()" [outlined]="edits.active()" size="small"
+              [pTooltip]="edits.active() ? m.anchorEdit.stop : m.anchorEdit.start" (onClick)="edits.toggle()" />
+          }
+          <!-- Drawing only in preparation; elsewhere the same panel only shows or hides the layers. -->
+          <p-button [icon]="can.prepare() ? 'pi pi-pencil' : 'pi pi-clone'" [text]="true" size="small" [pTooltip]="m.drawing.layers"
+            (onClick)="drawingOpen.set(!drawingOpen())" />
+        </div>
+      }
+      @if (layers().length > 0) {
+        <div class="layer-switcher">
+          @for (layer of layers(); track layer.id) {
+            <label [class.failed]="layerErrors()[layer.id]">
+              <p-checkbox [binary]="true" [ngModel]="visible()[layer.id]" (ngModelChange)="toggle(layer.id, $event)" />
+              {{ layer.name }}
+              @if (layerErrors()[layer.id]; as error) {
+                <i class="pi pi-exclamation-triangle" [pTooltip]="error" tooltipPosition="left"></i>
+              }
+            </label>
+          }
+        </div>
+      }
+    </div>
+    @if (selection.siteId() != null) {
       @if (drawingOpen()) {
         <div class="draw-dock"><app-draw-panel [map]="olMap()" /></div>
       }
       <app-map-legend class="legend-dock" />
-    }
-    @if (layers().length > 0) {
-      <div class="layer-switcher">
-        @for (layer of layers(); track layer.id) {
-          <label [class.failed]="layerErrors()[layer.id]">
-            <p-checkbox [binary]="true" [ngModel]="visible()[layer.id]" (ngModelChange)="toggle(layer.id, $event)" />
-            {{ layer.name }}
-            @if (layerErrors()[layer.id]; as error) {
-              <i class="pi pi-exclamation-triangle" [pTooltip]="error" tooltipPosition="left"></i>
-            }
-          </label>
-        }
-      </div>
     }
     @if (tools.tool(); as tool) {
       <p-message severity="info" styleClass="tool-hint">{{ tool.hint ?? (tool.kind === 'polygon' ? m.sites.drawHint : m.sites.pickHint) }}</p-message>
@@ -107,16 +114,30 @@ const CONE_LENGTH_M = 8;
     :host {
       position: absolute;
       inset: 0;
+      container-type: size;
     }
     .map {
       position: absolute;
       inset: 0;
       background: var(--p-surface-100);
     }
-    .layer-switcher {
+    .top-dock {
       position: absolute;
       top: 0.5rem;
+      left: 2.75rem;
       right: 0.5rem;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 0.5rem;
+      pointer-events: none;
+      > * {
+        pointer-events: auto;
+      }
+    }
+    .layer-switcher {
+      margin-left: auto;
       display: flex;
       flex-direction: column;
       gap: 0.35rem;
@@ -136,9 +157,8 @@ const CONE_LENGTH_M = 8;
       }
     }
     .level-bar {
-      position: absolute;
-      top: 0.5rem;
-      left: 2.75rem;
+      max-width: 100%;
+      flex-wrap: wrap;
       display: flex;
       align-items: center;
       gap: 0.25rem;
@@ -160,6 +180,12 @@ const CONE_LENGTH_M = 8;
     }
     :host ::ng-deep .level-select {
       min-width: 11rem;
+    }
+    /* A narrow map (e.g. next to an open panorama): a smaller level list. */
+    @container (max-width: 40rem) {
+      :host ::ng-deep .level-select {
+        min-width: 8rem;
+      }
     }
     :host ::ng-deep .tool-hint {
       position: absolute;
@@ -273,6 +299,18 @@ export class OverviewMap {
       this.selection.focusTick();
       untracked(() => {
         if (nodeId != null) this.showNodeAnchors(nodeId);
+      });
+    });
+    // A node without a place on the map (a room, equipment in a room) still has a level in the hierarchy: the map
+    // shows that level, so a panorama upload or a point placed next goes to it.
+    effect(() => {
+      const members = this.selection.members();
+      this.selection.focusTick();
+      untracked(() => {
+        const levelId = members?.node.levelId;
+        const nodeId = this.selection.nodeId();
+        if (members?.node.nodeId !== nodeId || nodeId === this.placedNode || levelId == null || levelId === this.selection.levelId()) return;
+        this.selection.levelId.set(levelId);
       });
     });
     effect(() => {
@@ -400,9 +438,13 @@ export class OverviewMap {
    * A node selected anywhere: if it has an anchor but none on the current level, the map goes to the level and place
    * of its first anchor (spec 1.5: "if the element has a floorplan appearance, it shows on the floorplan").
    */
+  /** The last node shown at its own place on the map (its level wins over the one in the hierarchy). */
+  private placedNode: number | null = null;
+
   private showNodeAnchors(nodeId: number): void {
     this.api.place(nodeId).subscribe((place) => {
       if (this.selection.nodeId() !== nodeId || !place) return;
+      this.placedNode = nodeId;
       if (place.levelId !== this.selection.levelId()) {
         // The level change must not zoom to the level's panoramas: the map goes to the node.
         this.focusPending = true;

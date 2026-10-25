@@ -15,6 +15,7 @@ import struct
 from urllib.parse import unquote
 
 from PIL import Image
+from messages import msg
 
 GLB_MAGIC = 0x46546C67
 JSON_CHUNK = 0x4E4F534A
@@ -36,7 +37,7 @@ def read_glb(path: str) -> tuple[dict, bytes]:
         data = f.read()
     magic, _, _ = struct.unpack_from("<III", data, 0)
     if magic != GLB_MAGIC:
-        raise ValueError("Not a GLB file.")
+        raise ValueError(msg("not_glb"))
     offset, gltf, binary = 12, None, b""
     while offset < len(data):
         length, kind = struct.unpack_from("<II", data, offset)
@@ -129,4 +130,4 @@ def embed(glb_path: str, model_dir: str, upload_root: str) -> list[str]:
     if not missing:
         return []
     shown = ", ".join(sorted(set(missing))[:5])
-    return [f"Missing texture(s), shown grey: {shown}" + (" …" if len(set(missing)) > 5 else "")]
+    return [msg("textures_missing", shown + (" …" if len(set(missing)) > 5 else ""))]

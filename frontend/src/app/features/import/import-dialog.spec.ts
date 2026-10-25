@@ -19,7 +19,7 @@ describe('ImportDialog', () => {
         id: 6, code: 'equipment', name: 'Berendezés', aspect: 'function', isLevel: false, shared: true,
         attrSchema: { type: 'object', properties: { manufacturer: { type: 'string', title: 'Gyártó' }, power_kw: { type: 'number', title: 'Teljesítmény (kW)' } } },
         baseSchema: null,
-        extensionSchema: null,
+        extensionSchema: null, allowedParents: null,
       },
     ]);
     selection.siteId.set(1);

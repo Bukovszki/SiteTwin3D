@@ -41,6 +41,13 @@ public class NodeType
     public bool IsLevel { get; set; }
     /// <summary>JSON Schema of the technical data (validation, form, grid columns; FR-H5).</summary>
     public JsonDocument? AttrSchema { get; set; }
+    /// <summary>
+    /// Under which types a node of this type may be (type codes; <see cref="TopLevel"/> = at the top of its tree);
+    /// null: anywhere in its tree. E.g. a room only under a level (user decision).
+    /// </summary>
+    public List<string>? AllowedParents { get; set; }
+
+    public const string TopLevel = "";
 }
 
 /// <summary>

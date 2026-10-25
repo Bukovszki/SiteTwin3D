@@ -878,6 +878,10 @@ namespace Api.Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
+                    b.PrimitiveCollection<string>("AllowedParents")
+                        .HasColumnType("json")
+                        .HasColumnName("allowed_parents");
+
                     b.Property<string>("Aspect")
                         .IsRequired()
                         .HasColumnType("text")

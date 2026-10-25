@@ -76,8 +76,7 @@ public class NodeService(AppDbContext db, Auth.CurrentUser currentUser, NodeType
         if (!await db.Sites.AnyAsync(s => s.Id == request.SiteId, ct))
             throw AppException.NotFound("site.not_found", $"Site {request.SiteId} not found.");
         var type = await FindTypeAsync(request.TypeId, ct);
-        if (request.ParentId is { } parentId)
-            await CheckParentAsync(parentId, request.SiteId, type, ct);
+        await CheckParentAsync(request.ParentId, request.SiteId, type, ct);
 
         var attrs = request.Attrs ?? EmptyObject();
         AttrValidator.RejectReserved(attrs);
@@ -116,9 +115,11 @@ public class NodeService(AppDbContext db, Auth.CurrentUser currentUser, NodeType
         }
         if (request.ParentIdSet && request.ParentId != node.ParentId)
         {
-            if (request.ParentId is { } parentId) await CheckParentAsync(parentId, node.SiteId, type, ct);
+            await CheckParentAsync(request.ParentId, node.SiteId, type, ct);
             node.ParentId = request.ParentId;
         }
+        else if (type.Id != node.Type.Id)
+            await CheckParentAsync(node.ParentId, node.SiteId, type, ct);
         if (request.Name is not null) node.Name = ValidName(request.Name);
         if (request.CodeSet) node.Code = Trimmed(request.Code);
         if (request.SortOrder is { } sortOrder) node.SortOrder = sortOrder;
@@ -203,17 +204,32 @@ public class NodeService(AppDbContext db, Auth.CurrentUser currentUser, NodeType
         await db.NodeTypes.AsNoTracking().FirstOrDefaultAsync(t => t.Id == typeId, ct)
         ?? throw AppException.BadRequest("node.unknown_type", $"Node type {typeId} does not exist.");
 
-    /// <summary>The parent exists (in the organization), is on the same site and belongs to the same tree (aspect).</summary>
-    internal async Task CheckParentAsync(long parentId, long siteId, NodeType childType, CancellationToken ct)
+    /// <summary>
+    /// The parent exists (in the organization), is on the same site and belongs to the same tree (aspect), and the type
+    /// may be there (<see cref="NodeType.AllowedParents"/>; null parent: at the top of the tree).
+    /// </summary>
+    internal async Task CheckParentAsync(long? parentId, long siteId, NodeType childType, CancellationToken ct)
     {
-        var parent = await db.Nodes.AsNoTracking().Include(n => n.Type).FirstOrDefaultAsync(n => n.Id == parentId, ct)
-            ?? throw AppException.BadRequest("node.parent_not_found", $"Parent node {parentId} not found.");
+        if (parentId is not { } id)
+        {
+            if (childType.AllowedParents is { } top && !top.Contains(NodeType.TopLevel))
+                throw ParentNotAllowed(childType);
+            return;
+        }
+        var parent = await db.Nodes.AsNoTracking().Include(n => n.Type).FirstOrDefaultAsync(n => n.Id == id, ct)
+            ?? throw AppException.BadRequest("node.parent_not_found", $"Parent node {id} not found.");
         if (parent.SiteId != siteId)
             throw AppException.BadRequest("node.parent_other_site", "The parent node is on another site.");
         if (parent.Type.Aspect != childType.Aspect)
             throw AppException.BadRequest("node.aspect_mismatch",
                 "Parent and child must belong to the same tree (aspect); link the trees with relations instead.");
+        if (childType.AllowedParents is { } allowed && !allowed.Contains(parent.Type.Code))
+            throw ParentNotAllowed(childType);
     }
+
+    private static AppException ParentNotAllowed(NodeType type) =>
+        AppException.BadRequest("node.parent_type_not_allowed",
+            $"A '{type.Code}' may only be under: {string.Join(", ", type.AllowedParents!.Select(p => p == NodeType.TopLevel ? "(top level)" : p))}.");
 
     /// <summary>Number of labels of a path (LTree.NLevel only translates inside queries).</summary>
     public static int Depth(LTree path) => ((string)path).Count(c => c == '.') + 1;

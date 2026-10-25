@@ -98,6 +98,8 @@ export interface NodeType {
   baseSchema: AttrSchema | null;
   /** Shared types: the organization's added fields. */
   extensionSchema: AttrSchema | null;
+  /** Under which types it may be (codes; '' = top of the tree); null: anywhere in its tree. */
+  allowedParents: string[] | null;
 }
 
 export interface Node {

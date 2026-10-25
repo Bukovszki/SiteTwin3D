@@ -139,13 +139,13 @@ type Tool = 'box' | 'point' | 'element';
           [pTooltip]="m.viewer3d.flyTo"
           (onClick)="flyHome()"
         />
-        @if (can.anchors()) {
+        <!-- Boxes, points and elements are placed on a model: without one the tools are not offered. -->
+        @if (can.anchors() && readyModels().length > 0) {
           <p-button
             icon="pi pi-box"
             [text]="true"
             size="small"
             [pTooltip]="m.box.place"
-            [disabled]="readyModels().length === 0"
             (onClick)="startTool('box')"
           />
           <p-button
@@ -153,7 +153,6 @@ type Tool = 'box' | 'point' | 'element';
             [text]="true"
             size="small"
             [pTooltip]="m.viewer3d.point"
-            [disabled]="readyModels().length === 0"
             (onClick)="startTool('point')"
           />
           @if (hasSegmented()) {
@@ -212,7 +211,9 @@ type Tool = 'box' | 'point' | 'element';
           ><i class="pi pi-spin pi-spinner"></i> {{ m.viewer3d.converting }}</p-message
         >
       } @else if (loaded() && readyModels().length === 0) {
-        <p-message severity="secondary" styleClass="hint">{{ m.viewer3d.noModel }}</p-message>
+        <p-message severity="secondary" styleClass="hint">{{
+          can.prepare() ? m.viewer3d.noModelUpload : can.anchors() ? m.viewer3d.noModel : m.viewer3d.noModelView
+        }}</p-message>
       }
       @if (editing(); as box) {
         <div class="box-panel">

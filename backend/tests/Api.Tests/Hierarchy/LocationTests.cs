@@ -36,6 +36,28 @@ public sealed class LocationTests(PostgisFixture postgis) : ApiTestBase(postgis)
     }
 
     [Fact]
+    public async Task WithoutAnchors_TheLevelComesFromTheHierarchy()
+    {
+        // The map shows a room's level (or an equipment's place's) though nothing is on the map yet.
+        var org = await Api.NewOrganizationAsync();
+        var h = org.Http;
+        var site = await h.CreateSiteAsync();
+        async Task<long> NodeAsync(long? parent, string type, string name, object? attrs = null) =>
+            (await h.CreateNodeAsync(site, parent, await h.TypeIdAsync(type), name, attrs)).GetProperty("id").GetInt64();
+        var building = await NodeAsync(null, "building", "Raktárépület");
+        var ground = await NodeAsync(building, "level", "Földszint", new { elevation_m = 0 });
+        var room = await NodeAsync(ground, "room", "Kompresszorház");
+        var compressor = await NodeAsync(null, "equipment", "Légkompresszor 1");
+        await h.PutAsJsonAsync($"/api/v1/nodes/{compressor}/location", new { locationId = room });
+
+        long? Level(JsonElement members) => members.GetProperty("node").GetProperty("levelId") is { ValueKind: JsonValueKind.Number } l ? l.GetInt64() : null;
+        Assert.Equal(ground, Level(await h.GetFromJsonAsync<JsonElement>($"/api/v1/nodes/{room}/members")));
+        Assert.Equal(ground, Level(await h.GetFromJsonAsync<JsonElement>($"/api/v1/nodes/{ground}/members")));
+        Assert.Equal(ground, Level(await h.GetFromJsonAsync<JsonElement>($"/api/v1/nodes/{compressor}/members")));
+        Assert.Null(Level(await h.GetFromJsonAsync<JsonElement>($"/api/v1/nodes/{building}/members")));
+    }
+
+    [Fact]
     public async Task Line_ElementsAcrossLevels_ByRelationOrSmallestBox()
     {
         var org = await Api.NewOrganizationAsync();

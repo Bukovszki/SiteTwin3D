@@ -59,7 +59,7 @@ type TreeView = 'location' | 'function' | 'data';
           icon="pi pi-plus"
           [text]="true"
           size="small"
-          [pTooltip]="selected() ? m.tree.newChild : m.tree.newRoot"
+          [pTooltip]="createParent() ? m.tree.newChild : m.tree.newRoot"
           (onClick)="creating.set(true)"
         />
         <p-button
@@ -90,9 +90,10 @@ type TreeView = 'location' | 'function' | 'data';
       (onNodeCollapse)="expanded.delete($event.node.key!)"
       [filter]="true"
       filterBy="label,data.code"
+      filterMode="strict"
       [filterPlaceholder]="m.tree.filter"
-      [emptyMessage]="loading() ? m.common.loading : m.tree.empty"
-      [draggableNodes]="can.prepare()"
+      [emptyMessage]="loading() ? m.common.loading : emptyMessage()"
+      [draggableNodes]="can.anchors()"
       [droppableNodes]="true"
       [validateDrop]="true"
       (onNodeDrop)="drop($event)"
@@ -143,7 +144,7 @@ type TreeView = 'location' | 'function' | 'data';
       @defer {
         <app-node-create-dialog
           [(visible)]="creating"
-          [parent]="selected()"
+          [parent]="createParent()"
           (created)="selection.changed($event.id)"
         />
       }
@@ -220,6 +221,8 @@ export class TreePanel {
 
   /** Tree nodes built from the flat list (parentId), siblings in sort order. */
   private readonly index = computed(() => {
+    // Preparation moves anything; assignment only sets the place of equipment (the placed leaves).
+    const movable = this.can.prepare();
     const byId = new Map<number, TreeNode<Node>>();
     for (const node of this.nodes()) {
       byId.set(node.id, {
@@ -229,6 +232,7 @@ export class TreePanel {
         children: [],
         icon: this.icon(node),
         expanded: this.expanded.has(String(node.id)),
+        draggable: movable,
       });
     }
     const roots: TreeNode<Node>[] = [];
@@ -253,7 +257,7 @@ export class TreePanel {
     sort(roots);
     const data = new Map<string, TreeNode>();
     if (this.view() === 'location') this.addPlaced(byId, roots);
-    else if (this.view() === 'data') this.addData(byId, roots, data);
+    else if (this.view() === 'data') this.addData(byId, roots, data, movable);
     return { byId, roots, data };
   });
 
@@ -277,12 +281,14 @@ export class TreePanel {
     byId: Map<number, TreeNode<Node>>,
     roots: TreeNode<Node>[],
     data: Map<string, TreeNode>,
+    movable: boolean,
   ): void {
     const rest: TreeNode[] = [];
     const add = (leaf: TreeNode, nodeId: number | null) => {
       const parent = this.locationOf(nodeId, byId);
       leaf.leaf = true;
       leaf.droppable = false;
+      leaf.draggable = movable;
       if (parent) {
         leaf.parent = parent;
         parent.children!.push(leaf as TreeNode<Node>);
@@ -373,6 +379,7 @@ export class TreePanel {
       type: 'folder',
       icon: 'pi pi-inbox',
       selectable: false,
+      draggable: false,
       children: unplaced,
       expanded: this.expanded.has('unplaced'),
     };
@@ -409,10 +416,19 @@ export class TreePanel {
   }
 
   protected readonly roots = computed(() => this.index().roots);
+  /** An empty tree tells what to start with (the editor) or that nothing is there yet (the viewer). */
+  protected readonly emptyMessage = computed(() =>
+    this.can.prepare() ? this.m.tree.emptyStart[this.view()] : this.m.tree.empty,
+  );
   protected readonly selectedTreeNode = computed<TreeNode | null>(() => {
     const key = this.dataKey();
     if (key != null && this.index().data.has(key)) return this.index().data.get(key)!;
     return this.index().byId.get(this.selection.nodeId() ?? -1) ?? null;
+  });
+  /** The parent offered for a new node: the selection, if it is in the tree shown (not a placed equipment). */
+  protected readonly createParent = computed(() => {
+    const node = this.selected();
+    return node && node.aspect === this.selection.aspect() ? node : null;
   });
   protected readonly selected = computed(() => {
     const node = this.selectedTreeNode();
@@ -564,7 +580,12 @@ export class TreePanel {
     const dragged = dragNode?.data as Node | undefined;
     // The tree subscribes to drags only if dropping is on when it starts, so dropping is always on and the mode is
     // checked here (dragging is off outside preparation anyway).
-    if (!dragNode || !dropNode || !this.can.prepare()) return;
+    if (!dragNode || !dropNode || !this.can.anchors()) return;
+    // Assignment: only the place of equipment.
+    if (!this.can.prepare() && dragNode.type !== 'placed') {
+      this.load();
+      return;
+    }
     event.accept?.();
     const parentNode = dropNode.children?.includes(dragNode) ? dropNode : (dropNode.parent ?? null);
     // Uploaded data in the data tree: the drop sets the node it belongs to.

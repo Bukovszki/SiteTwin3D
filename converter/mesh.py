@@ -10,6 +10,7 @@ import os
 import subprocess
 
 import textures
+from messages import msg
 
 EXTENSIONS = (".obj", ".fbx", ".dae", ".stl", ".ply", ".3ds", ".gltf", ".x3d", ".off")
 
@@ -19,13 +20,13 @@ def convert(path: str, out_path: str, upload_root: str | None = None) -> dict:
     result = subprocess.run(["assimp", "export", path, out_path, "-fglb2"], capture_output=True, text=True, timeout=3600)
     if result.returncode != 0:
         message = (result.stderr or result.stdout).strip().splitlines()
-        raise ValueError(f"The model could not be read: {message[-1] if message else 'unknown error'}")
-    warnings = [line.strip() for line in result.stdout.splitlines() if "warn" in line.lower()][:5]
+        raise ValueError(msg("unreadable", message[-1]) if message else msg("unreadable"))
+    warnings = [msg("reader_warning", line.strip()) for line in result.stdout.splitlines() if "warn" in line.lower()][:5]
     # External textures into the GLB (the browser cannot follow file references into the object store).
     warnings += textures.embed(out_path, os.path.dirname(path), upload_root or os.path.dirname(path))
     size = _extent(out_path)
     if size > LARGE_MODEL_M:
-        warnings.append(f"The model is {size:,.0f} m across: if it was exported in centimetres or millimetres, export it in metres.")
+        warnings.append(msg("too_large_extent", round(size)))
     return {"kind": "gltf", "segmented": False, "placement": None, "warnings": warnings}
 
 

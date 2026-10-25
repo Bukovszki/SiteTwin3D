@@ -102,6 +102,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options, Curren
             // json, not jsonb: jsonb reorders keys, and the property order is the order of form fields and grid columns.
             e.Property(x => x.AttrSchema).HasColumnType("json");
             e.Property(x => x.IsLevel).HasDefaultValue(false).ValueGeneratedNever();
+            e.Property(x => x.AllowedParents).HasColumnType("json");
             e.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => new { x.OrganizationId, x.Code }).IsUnique().AreNullsDistinct(false);
             e.ToTable(t => t.HasCheckConstraint("node_type_aspect", "aspect IN ('location', 'function')"));

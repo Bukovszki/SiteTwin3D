@@ -88,7 +88,7 @@ public class ModelConversionService(AppDbContext db, IObjectStorage storage, IHt
             // The converter is not reachable (starting, restarting): try again later, then give up.
             var attempts = (attrs["conversion_attempts"]?.GetValue<int>() ?? 0) + 1;
             attrs["conversion_attempts"] = attempts;
-            if (attempts >= options.Value.MaxAttempts) Fail(asset, "The converter could not be reached.");
+            if (attempts >= options.Value.MaxAttempts) Fail(asset, "converter_unreachable");
             asset.Attrs = JsonSerializer.SerializeToDocument(attrs);
             await db.SaveChangesAsync(ct);
             logger.LogWarning("Model {Id}: converter not reachable ({Attempt}/{Max}): {Message}", asset.Id, attempts, options.Value.MaxAttempts, e.Message);
@@ -124,7 +124,7 @@ public class ModelConversionService(AppDbContext db, IObjectStorage storage, IHt
             var (lon, lat, height, heading) = result.Placement is { } p
                 ? (p.Lon, p.Lat, p.AbsoluteHeightM - site.BaseHeightM, p.HeadingDeg)
                 : (site.RefPoint.X, site.RefPoint.Y, 0.0, 0.0);
-            if (result.Placement is null) warnings.Add("Placed at the site point: give its placement in the model list if it is elsewhere.");
+            if (result.Placement is null) warnings.Add("placed_at_site_point");
             attrs["placement"] = new JsonObject { ["lon"] = lon, ["lat"] = lat, ["height_m"] = Math.Round(height, 3), ["heading_deg"] = heading };
         }
         attrs["conversion"] = new JsonObject
@@ -141,6 +141,7 @@ public class ModelConversionService(AppDbContext db, IObjectStorage storage, IHt
         return true;
     }
 
+    /// <summary>Errors and warnings are codes with details (<c>code</c> or <c>code:detail|detail</c>, as the converter's); the UI words them.</summary>
     private static void Fail(ModelAsset asset, string error)
     {
         asset.Status = ModelStatus.Failed;
@@ -155,7 +156,7 @@ public class ModelConversionService(AppDbContext db, IObjectStorage storage, IHt
             if (body.TryGetProperty("error", out var e) && e.GetString() is { Length: > 0 } message) return message;
         }
         catch (JsonException) { }
-        return $"The converter answered {(int)response.StatusCode}.";
+        return $"converter_status:{(int)response.StatusCode}";
     }
 }
 

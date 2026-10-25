@@ -17,6 +17,7 @@ import ifcopenshell
 import ifcopenshell.geom
 
 from glb import Primitive, write_glb
+from messages import msg
 
 SKIPPED = ("IfcOpeningElement", "IfcSpace", "IfcVirtualElement", "IfcAnnotation", "IfcGrid")
 # Without an IFC style: a colour by class, so walls, slabs and equipment are told apart.
@@ -85,7 +86,7 @@ def convert(path: str, out_path: str) -> dict:
     model = ifcopenshell.open(path)
     iterator = ifcopenshell.geom.iterator(_settings(), model, multiprocessing.cpu_count(), exclude=SKIPPED)
     if not iterator.initialize():
-        raise ValueError("The IFC file has no geometry that can be shown.")
+        raise ValueError(msg("ifc_no_geometry"))
 
     ids, names, classes = [], [], []
     groups: dict[tuple, dict[str, list]] = {}
@@ -117,7 +118,7 @@ def convert(path: str, out_path: str) -> dict:
         if not iterator.next():
             break
     if not ids:
-        raise ValueError("The IFC file has no elements with geometry.")
+        raise ValueError(msg("ifc_no_elements"))
 
     # A local origin for far-away coordinates; the shift goes into the placement.
     all_points = np.concatenate([p for g in groups.values() for p in g["pos"]])
@@ -139,7 +140,7 @@ def convert(path: str, out_path: str) -> dict:
     warnings = []
     placement = _georeference(model, offset)
     if placement is None and offset.any():
-        warnings.append("The model was far from its origin and was moved to a local origin; give its placement.")
+        warnings.append(msg("ifc_far_origin"))
     return {"kind": "gltf", "segmented": True, "elementIdProperty": "element_id", "elements": len(ids),
             "schema": model.schema, "placement": placement, "warnings": warnings,
             "size": [float(v) for v in (hi - lo)]}

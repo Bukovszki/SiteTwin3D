@@ -86,11 +86,11 @@ export class ApiService {
   // Node types
   nodeTypes(): Observable<NodeType[]> {
     return this.http.get<NodeType[]>(`${API}/node-types`);
-  }  createNodeType(body: { code: string; name: string; aspect: 'location' | 'function'; isLevel: boolean; attrSchema: AttrSchema | null }): Observable<NodeType> {
+  }  createNodeType(body: { code: string; name: string; aspect: 'location' | 'function'; isLevel: boolean; attrSchema: AttrSchema | null; allowedParents: string[] | null }): Observable<NodeType> {
     return this.http.post<NodeType>(`${API}/node-types`, body);
   }
-  /** Own types: name and fields (attrSchema null removes them). */
-  updateNodeType(id: number, patch: { name?: string; attrSchema?: AttrSchema | null }): Observable<NodeType> {
+  /** Own types: name, fields (attrSchema null removes them) and where they may be (allowedParents null: anywhere). */
+  updateNodeType(id: number, patch: { name?: string; attrSchema?: AttrSchema | null; allowedParents?: string[] | null }): Observable<NodeType> {
     return this.http.patch<NodeType>(`${API}/node-types/${id}`, patch);
   }
   deleteNodeType(id: number): Observable<void> {

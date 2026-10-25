@@ -1,4 +1,4 @@
-import { Component, inject, model, signal } from '@angular/core';
+import { ChangeDetectorRef, Component, inject, model, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ConfirmationService, MessageService } from 'primeng/api';
 import { Button } from 'primeng/button';
@@ -91,6 +91,7 @@ export class SitesDialog {
   private readonly api = inject(ApiService);
   private readonly confirm = inject(ConfirmationService);
   private readonly toasts = inject(MessageService);
+  private readonly changes = inject(ChangeDetectorRef);
 
   readonly visible = model(false);
 
@@ -116,11 +117,16 @@ export class SitesDialog {
     this.tools.pickPoint(([lon, lat]) => {
       this.lon = Math.round(lon * 1e8) / 1e8;
       this.lat = Math.round(lat * 1e8) / 1e8;
+      // Zoneless: a map callback does not refresh the form by itself.
+      this.changes.markForCheck();
     });
   }
 
   protected drawExtent(): void {
-    this.tools.drawPolygon((ring) => (this.extent = { type: 'Polygon', coordinates: [ring] }));
+    this.tools.drawPolygon((ring) => {
+      this.extent = { type: 'Polygon', coordinates: [ring] };
+      this.changes.markForCheck();
+    });
   }
 
   protected save(): void {

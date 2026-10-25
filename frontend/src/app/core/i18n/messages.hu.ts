@@ -129,8 +129,8 @@ export const MESSAGES_HU = {
     placedNoDelete: 'A berendezést a funkcionális fában törölheti; itt csak a helye látszik.',
     notAPlace: 'Ide nem helyezhető: a helyszíni fában csak épület, szint, helyiség alá kerülhet.',
     filter: 'Szűrés név vagy kód szerint',
-    newRoot: 'Új gyökérelem',
-    newChild: 'Új gyermekelem',
+    newRoot: 'Új elem a fa tetejére',
+    newChild: 'Új elem (a kijelölt alá vagy a fa tetejére)',
     deleteConfirm: (name: string) => `Biztosan törli: „${name}”?`,
     deleteSubtreeConfirm: (name: string) => `„${name}” alatt további elemek vannak. Törli a teljes részfát (a horgonyokkal együtt)?`,
     moveConfirm: (name: string, target: string) => `Áthelyezi „${name}” elemet (a részfájával) ide: „${target}”?`,
@@ -138,6 +138,11 @@ export const MESSAGES_HU = {
     moved: 'Áthelyezve',
     deleted: 'Törölve',
     empty: 'Ebben a fában még nincs elem.',
+    emptyStart: {
+      location: 'Még üres. Kezdje egy épülettel vagy kültéri területtel a fenti + gombbal; az épület alá szint, a szint alá helyiség kerül.',
+      function: 'Még üres. Hozzon létre technológiai vonalat vagy berendezést a fenti + gombbal; berendezés a helyszíni fában a helyisége alatt is létrehozható.',
+      data: 'Még nincs feltöltött adat. Panorámát a térkép kamera gombjával, 3D modellt a 3D fül feltöltés gombjával tölthet fel.',
+    } as Record<string, string>,
   },
   node: {
     name: 'Megnevezés',
@@ -145,6 +150,10 @@ export const MESSAGES_HU = {
     type: 'Típus',
     parent: 'Szülő',
     root: '(gyökér)',
+    where: 'Hová kerül',
+    under: (name: string) => `${name} alá`,
+    top: 'Legfelső szintre',
+    noTypeHere: 'Ide egyik típus sem kerülhet – válasszon másik helyet (pl. „Legfelső szintre”).',
     createTitle: 'Új elem',
     locationTypes: 'Helyszíni elem',
     equipmentHere: (place: string) => `Berendezés ide (${place})`,
@@ -281,6 +290,11 @@ export const MESSAGES_HU = {
     codeHint: 'Kisbetű, szám, aláhúzás; betűvel kezdődik. Létrehozás után nem változik.',
     aspect: 'Fa',
     isLevel: 'Szint típus (alaprajz, panorámák, szintvágás tartozik hozzá)',
+    parents: 'Hová kerülhet',
+    parentsHint: 'Mely elemek alá hozható létre (vagy a fa tetejére). Üresen: bárhová a fájában. A meglévő elemek a helyükön maradnak.',
+    anywhere: 'Bárhová',
+    top: 'A fa tetejére',
+    itself: 'Önmaga alá (azonos típus)',
     sharedHint: 'Közös alaptípus: a neve és a saját mezői nem módosíthatók, de a szervezet saját mezőket adhat hozzá. Ezek az alaptípus mezői után jelennek meg.',
     baseFields: 'Az alaptípus mezői',
     ownFields: 'A szervezet saját mezői',
@@ -401,6 +415,7 @@ export const MESSAGES_HU = {
     uncalibrated: 'Figyelem: a panoráma tájolása nincs kalibrálva, az infopont iránya pontatlan lehet.',
     moved: 'Az infopont helye mentve',
     delete: 'Infopont törlése',
+    deleteKind: (kind: string) => `${kind} törlése`,
     anchors: 'Megjelenések',
     noAnchors: 'Még nincs térbeli megjelenése.',
     kinds: { point: 'Pont', panorama_point: 'Infopont', region: 'Térrész', model_feature: 'Modellelem' } as Record<string, string>,
@@ -459,6 +474,8 @@ export const MESSAGES_HU = {
     webglUnavailable: 'A 3D nézet nem indítható: a böngésző nem támogatja a WebGL-t.',
     wholeModel: 'Teljes modell',
     noModel: 'Ehhez a telephelyhez még nincs 3D modell. Feltöltés: Előkészítés mód, a 3D eszköztár feltöltés gombja.',
+    noModelUpload: 'Ehhez a telephelyhez még nincs 3D modell. Töltsön fel egyet a fenti „Feltöltés” gombbal (GLB, IFC, FBX/OBJ ZIP-ben, pontfelhő).',
+    noModelView: 'Ehhez a telephelyhez még nincs 3D modell.',
     converting: 'Egy modell átalakítása folyamatban – kész állapotban magától megjelenik.',
     flyTo: 'Ugrás a modellre',
     loadFailed: (name: string) => `A(z) „${name}” modell nem tölthető be.`,
@@ -611,7 +628,9 @@ export const MESSAGES_HU = {
     uploadedConverting: 'Feltöltve – az átalakítás a háttérben fut, a modell utána jelenik meg.',
     conversionInfo: (source: string, elements: number | null, points: number | null, crs: string | null, warnings: string[]) =>
       [`Forrás: ${source}`, elements != null ? `${elements} elem` : null, points != null ? `${points.toLocaleString('hu-HU')} pont` : null,
-        crs ? `vetület: ${crs}` : null, ...warnings].filter(Boolean).join(' · '),
+        crs ? `vetület: ${crs}` : null, ...warnings.map(conversionMessage)].filter(Boolean).join(' · '),
+    /** An error or warning of the conversion (`code` or `code:detail|detail`); unknown text is shown as it is. */
+    message: (text: string | null) => (text ? conversionMessage(text) : ''),
     tilesHint: 'A mappa gyökerében tileset.json legyen; a csempék önálló fájlok (glb, b3dm …).',
     name: 'Név',
     placement: 'Elhelyezés (a GLB nem georeferált)',
@@ -652,6 +671,9 @@ export const MESSAGES_HU = {
     'node.parent_not_found': 'A szülőelem nem található.',
     'node.parent_other_site': 'A szülőelem másik telephelyen van.',
     'node.aspect_mismatch': 'A szülő és a gyermek ugyanabba a fába (helyszín vagy funkció) kell tartozzon; a fákat kapcsolatok kötik össze.',
+    'node.parent_type_not_allowed':
+      'Ez a típus ide nem kerülhet (pl. helyiség csak szint alá, szint csak épület alá, épület csak a fa tetejére). A szabály a Típusok ablakban látható.',
+    'node_type.invalid_parents': 'A „Hová kerülhet” listában ismeretlen típus van.',
     'node.invalid_attrs': 'A műszaki adatok nem felelnek meg a típus mezőleírásának.',
     'node.invalid_name': 'A megnevezés 1–200 karakter legyen.',
     'node.has_children': 'Az elem alatt további elemek vannak.',
@@ -751,3 +773,39 @@ export const MESSAGES_HU = {
 };
 
 export type Messages = typeof MESSAGES_HU;
+
+/** Model conversion errors and warnings (converter and API codes, see converter/messages.py). */
+const CONVERSION_MESSAGES: Record<string, (d: string[]) => string> = {
+  converter_unreachable: () => 'Az átalakító szolgáltatás nem érhető el. Próbálja újra később, vagy szóljon az üzemeltetőnek.',
+  converter_status: ([status]) => `Az átalakító szolgáltatás hibát jelzett (${status}).`,
+  failed: ([detail]) => `Az átalakítás nem sikerült${detail ? ` (${detail})` : ''}.`,
+  invalid_job: () => 'Hibás átalakítási feladat.',
+  unknown_format: ([kind]) => `Ismeretlen formátum: ${kind}.`,
+  zip_invalid: () => 'A fájl nem érvényes ZIP-archívum.',
+  zip_too_many_files: ([count, max]) => `A ZIP túl sok fájlt tartalmaz (${count}; legfeljebb ${max}).`,
+  zip_unsafe_path: ([name]) => `A ZIP nem biztonságos elérési utat tartalmaz: ${name}`,
+  zip_too_large: ([mb]) => `A kibontott ZIP nagyobb ${mb} MB-nál.`,
+  zip_model_count: ([names]) => `A ZIP-ben pontosan egy modell legyen (GLB, IFC, FBX/OBJ… vagy pontfelhő); talált: ${names}.`,
+  zip_no_model: () => 'A ZIP-ben nincs felismerhető modell (GLB, IFC, FBX/OBJ…, pontfelhő vagy tileset.json).',
+  not_glb: () => 'A fájl nem GLB.',
+  unreadable: ([detail]) => `A modell nem olvasható be${detail ? ` (${detail})` : ''}.`,
+  reader_warning: ([detail]) => `Modellolvasó figyelmeztetése: ${detail}`,
+  too_large_extent: ([size]) =>
+    `A modell ${Number(size).toLocaleString('hu-HU')} m kiterjedésű: ha centiméterben vagy milliméterben exportálták, exportálja méterben.`,
+  textures_missing: ([names]) => `Hiányzó textúra (szürkén jelenik meg): ${names}`,
+  ifc_no_geometry: () => 'Az IFC-fájlban nincs megjeleníthető geometria.',
+  ifc_no_elements: () => 'Az IFC-fájlban nincs geometriával rendelkező elem.',
+  ifc_far_origin: () => 'A modell messze volt az origótól, ezért helyi origóba került: adja meg az elhelyezését.',
+  points_empty: () => 'A pontfelhőben nincs pont.',
+  points_thinned: ([total, kept]) =>
+    `${Number(total).toLocaleString('hu-HU')} pontból egyenletes ritkítással ${Number(kept).toLocaleString('hu-HU')} maradt.`,
+  unknown_srs: ([srs]) => `Ismeretlen vetület: ${srs}`,
+  points_outside_srs: ([srs]) => `A pontok kívül esnek a(z) ${srs} vetület területén: ellenőrizze a vetületet.`,
+  placed_at_site_point: () => 'A telephely pontjára került: ha máshol van, adja meg az elhelyezését a modellek listájában.',
+};
+
+function conversionMessage(text: string): string {
+  const match = /^([a-z0-9_]+)(?::([\s\S]*))?$/.exec(text);
+  const format = match && CONVERSION_MESSAGES[match[1]];
+  return format ? format(match[2] != null ? match[2].split('|') : []) : text;
+}

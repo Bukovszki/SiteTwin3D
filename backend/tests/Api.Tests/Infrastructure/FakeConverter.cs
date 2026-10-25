@@ -12,7 +12,7 @@ public sealed class FakeConverter : HttpMessageHandler
 
     /// <summary>The answer for a job (its output prefix is passed); null: 422 with <see cref="Error"/>.</summary>
     public Func<JsonElement, JsonObject?> Answer { get; set; } = _ => null;
-    public string Error { get; set; } = "The model could not be read.";
+    public string Error { get; set; } = "unreadable";
     public bool Down { get; set; }
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

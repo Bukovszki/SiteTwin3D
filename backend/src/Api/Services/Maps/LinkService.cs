@@ -40,7 +40,7 @@ public class LinkService(AppDbContext db, MapManagerClient mapManager, NodeServi
         var layer = ValidLayerName(request.Layer);
         var type = await db.NodeTypes.AsNoTracking().FirstOrDefaultAsync(t => t.Id == request.TypeId, ct)
             ?? throw AppException.BadRequest("node.unknown_type", $"Node type {request.TypeId} does not exist.");
-        if (request.ParentId is { } parentId) await nodes.CheckParentAsync(parentId, siteId, type, ct);
+        await nodes.CheckParentAsync(request.ParentId, siteId, type, ct);
 
         var fields = await mapManager.FieldsAsync(layer, ct);
         if (!fields.Any(f => f.Name == request.NameField && f.Kind != "geometry"))

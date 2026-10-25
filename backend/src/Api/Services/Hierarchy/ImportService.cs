@@ -37,7 +37,7 @@ public class ImportService(AppDbContext db, NodeService nodes, NodeTypeService t
             throw AppException.BadRequest("import.too_many_rows", $"At most {MaxRows} rows can be imported at once.");
         var type = await db.NodeTypes.AsNoTracking().FirstOrDefaultAsync(t => t.Id == request.TypeId, ct)
             ?? throw AppException.BadRequest("node.unknown_type", $"Node type {request.TypeId} does not exist.");
-        if (request.ParentId is { } parentId) await nodes.CheckParentAsync(parentId, siteId, type, ct);
+        await nodes.CheckParentAsync(request.ParentId, siteId, type, ct);
 
         // The type's fields with the organization's own ones (added to a shared base type).
         var schema = await types.SchemaOfAsync(type, ct);

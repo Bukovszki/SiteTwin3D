@@ -94,17 +94,19 @@ A példában az Adatgazda egy szennyvíztisztító telepet vesz fel: két épül
 *Előkészítés mód, fejléc → **Típusok**.* Itt dől el, milyen leíró adatokat lehet egy elemhez felvinni.
 
 - **Alaptípusokhoz saját mezők:** válassza ki pl. a **Helyiség** típust → **Mező hozzáadása** → felirat (pl. *Alapterület (m²)*), fajta (*Szöveg, Egész szám, Szám, Igen/nem, Választólista, Dátum*), *Kötelező* → **Mentés**. A mezők a szervezet minden helyiségénél megjelennek az adatlapon, a táblázat oszlopaiban és a táblázatos importban; más szervezetet nem érintenek.
-- **Új saját típus:** **Új típus** → megnevezés (a kód magától képződik), fa (*Helyszín* vagy *Funkció*), szükség esetén *Szint típus*, mezők → **Mentés**. Ezután a fában az új típusú elem is létrehozható.
+- **Új saját típus:** **Új típus** → megnevezés (a kód magától képződik), fa (*Helyszín* vagy *Funkció*), szükség esetén *Szint típus*, **Hová kerülhet** (mely típusok alá vagy a fa tetejére; üresen bárhová), mezők → **Mentés**. Ezután a fában az új típusú elem is létrehozható.
 - A mezők sorrendje (nyilakkal) az adatlap és a táblázat oszlopainak sorrendje. Egy mező törlésekor a már beírt értékek megmaradnak, csak nem jelennek meg.
 
 ### 2. Helyszíni szerkezet: épületek, szintek, helyiségek
 
 *Előkészítés mód, Fa fül, Helyszín nézet.*
 
-1. Ha nincs kijelölve semmi, a **+** (*Új gyökérelem*) gyökérszintű elemet hoz létre: típus **Épület**, megnevezés *Gépház*, kód *G*.
-2. Jelölje ki a Gépházat, majd **+** (*Új gyermekelem*): típus **Szint**, megnevezés *Gépház földszint*, kód *F0*. A szintnél kötelező a **Padlómagasság az alapmagasságtól (m)** – a földszint 0, az emelet pl. 4,5. A *Belmagasság* a 3D szintvágáshoz kell.
-3. A szint alá vegye fel a **helyiségeket** (Szivattyútér, Kapcsolótér, Raktár …), kültéri létesítményhez **Kültéri terület** típust (Eleveniszapos medence).
+1. **+** gomb → az ablakban a **Hová kerül** választóval döntheti el, hogy az új elem a kijelölt elem alá vagy a **fa tetejére** kerüljön (kijelölés nélkül mindig a fa tetejére). Első elem: típus **Épület**, megnevezés *Gépház*, kód *G*.
+2. Jelölje ki a Gépházat, majd **+** → *Gépház alá*: a típus magától **Szint** (épület alá csak szint kerülhet), megnevezés *Gépház földszint*, kód *F0*. A szintnél kötelező a **Padlómagasság az alapmagasságtól (m)** – a földszint 0, az emelet pl. 4,5. A *Belmagasság* a 3D szintvágáshoz kell.
+3. A szint alá vegye fel a **helyiségeket** (Szivattyútér, Kapcsolótér, Raktár …), kültéri létesítményhez **Kültéri terület** típust a fa tetejére (Eleveniszapos medence).
 4. Elrontott szerkezet javítása: az elemek **áthúzhatók** másik szülő alá (a rendszer megerősítést kér), törlésnél a teljes részfa törölhető.
+
+> **Mi hová kerülhet:** épület és kültéri terület a fa tetejére, szint épület alá, helyiség szint alá; technológiai vonal a funkcionális fa tetejére vagy vonal alá, berendezés bárhová a funkcionális fában. Az ablak csak az adott helyen megengedett típusokat kínálja. Saját típusnál ezt a szervezeti admin állítja be a **Típusok** ablakban (*Hová kerülhet*; üresen bárhová).
 
 > A kódok (pl. *G-F0-01*) később a táblázatos importoknál azonosítják a rekordokat – érdemes egyedi, beszédes kódokat adni.
 
@@ -184,14 +186,14 @@ A rendszer a háttérben arcokat keres a képen. Amíg ez fut, a panoráma álla
 
 ### 7. A berendezések helye
 
-*Előkészítés mód, Fa → Helyszín nézet.*
+*Előkészítés vagy Összerendelés mód, Fa → Helyszín nézet.* (Összerendelésben csak a berendezések helye változtatható, a fa szerkezete nem.)
 
 A helyszíni fában a berendezések (🔗 jellel) a helyük alatt látszanak; akinek még nincs helye, a **Hely nélkül** csoportban van.
 
 - **Létrehozás közvetlenül a helyiség alatt:** jelölje ki a helyiséget → **+** → a típuslistában a *Berendezés ide (…)* csoportból válasszon (pl. *Berendezés*) → opcionálisan a **funkcionális szülő** (pl. a technológiai vonal) → **Létrehozás**. A berendezés a funkcionális fába kerül, a helye ez a helyiség lesz.
 
 - **Áthúzással:** húzza a berendezést a **Hely nélkül** csoportból (vagy egy másik helyiségből) a helyiségre → „*„Befolyó szivattyú 1” helye legyen: Szivattyútér?*” → **Igen**. A funkcionális fában a berendezés a vonala alatt marad.
-- **Az adatlapon:** *Helye* → **Hely megadása** listából.
+- **Az adatlapon:** *Helye* → a listából (a jelenlegi hely látszik benne; az ✕ törli).
 - **Dobozzal:** ha a berendezésnek van doboza a 3D-ben, a helye magától a legkisebb, őt tartalmazó helyiségdoboz (az adatlapon „doboz alapján”). A megadott hely ezt felülírja.
 
 ### 8. Megjelenések: infopont, pont, doboz, modellelem

@@ -7,10 +7,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Api.Services.Hierarchy;
 
-public record NodeTypeCreate(string Code, string Name, string Aspect, bool? IsLevel, JsonElement? AttrSchema);
+public record NodeTypeCreate(string Code, string Name, string Aspect, bool? IsLevel, JsonElement? AttrSchema,
+    List<string>? AllowedParents = null);
 
 /// <summary>Partial update; null = not sent (<see cref="AttrSchemaSet"/> distinguishes removing the schema).</summary>
-public record NodeTypeUpdate(string? Name = null, JsonElement? AttrSchema = null, bool AttrSchemaSet = false);
+public record NodeTypeUpdate(string? Name = null, JsonElement? AttrSchema = null, bool AttrSchemaSet = false,
+    List<string>? AllowedParents = null, bool AllowedParentsSet = false);
 
 /// <summary>A type as the organization sees it: <see cref="Extension"/> = its own fields added to a shared base type.</summary>
 public record NodeTypeView(NodeType Type, JsonDocument? Extension)
@@ -128,6 +130,7 @@ public partial class NodeTypeService(AppDbContext db, Auth.CurrentUser currentUs
             Aspect = request.Aspect,
             IsLevel = request.IsLevel ?? false,
             AttrSchema = SchemaDocument(request.AttrSchema),
+            AllowedParents = await ValidParentsAsync(request.AllowedParents, request.Aspect, code, ct),
         };
         db.NodeTypes.Add(type);
         await db.SaveChangesAsync(ct);
@@ -143,8 +146,25 @@ public partial class NodeTypeService(AppDbContext db, Auth.CurrentUser currentUs
             AttrValidator.ValidateSchema(request.AttrSchema);
             type.AttrSchema = SchemaDocument(request.AttrSchema);
         }
+        if (request.AllowedParentsSet)
+            type.AllowedParents = await ValidParentsAsync(request.AllowedParents, type.Aspect, type.Code, ct);
         await db.SaveChangesAsync(ct);
         return type;
+    }
+
+    /// <summary>
+    /// Where a type may be: codes of visible types of the same tree (itself too) or "" for the top level;
+    /// null or empty list: anywhere. Existing records are not moved by a change, only new placements are checked.
+    /// </summary>
+    private async Task<List<string>?> ValidParentsAsync(List<string>? parents, string aspect, string code, CancellationToken ct)
+    {
+        if (parents is null || parents.Count == 0) return null;
+        var codes = parents.Select(p => (p ?? "").Trim()).Distinct().ToList();
+        var known = await db.NodeTypes.Where(t => t.Aspect == aspect).Select(t => t.Code).ToListAsync(ct);
+        var unknown = codes.Where(c => c != NodeType.TopLevel && c != code && !known.Contains(c)).ToList();
+        if (unknown.Count > 0)
+            throw AppException.BadRequest("node_type.invalid_parents", $"Unknown parent types in this tree: {string.Join(", ", unknown)}.");
+        return codes;
     }
 
     public async Task DeleteAsync(long id, CancellationToken ct)

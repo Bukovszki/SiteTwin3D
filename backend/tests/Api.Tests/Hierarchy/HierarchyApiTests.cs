@@ -25,6 +25,19 @@ public sealed class HierarchyApiTests(PostgisFixture postgis) : ApiTestBase(post
         return (org, site, building, level, room, building2);
     }
 
+    /// <summary>A chain of an own type allowed anywhere (the base types' parent rules would refuse these moves first).</summary>
+    private async Task<(OrgClient Org, long Outer, long Inner)> ZoneChainAsync()
+    {
+        var org = await Api.NewOrganizationAsync(Roles.Editor);
+        var admin = await Api.NewUserAsync(org.OrganizationId, org.OrganizationCode, Roles.OrgAdmin);
+        var site = await admin.Http.CreateSiteAsync();
+        var zone = (await TestApi.ReadJson(await admin.Http.PostAsJsonAsync("/api/v1/node-types",
+            new { code = "zone", name = "Zóna", aspect = "location" }))).GetProperty("id").GetInt64();
+        var outer = (await org.Http.CreateNodeAsync(site, null, zone, "Külső")).GetProperty("id").GetInt64();
+        var inner = (await org.Http.CreateNodeAsync(site, outer, zone, "Belső")).GetProperty("id").GetInt64();
+        return (org, outer, inner);
+    }
+
     [Fact]
     public async Task Create_ReturnsPathAndDepth()
     {
@@ -86,27 +99,27 @@ public sealed class HierarchyApiTests(PostgisFixture postgis) : ApiTestBase(post
     [Fact]
     public async Task Move_ToRoot_WithNullParent()
     {
-        var t = await LocationTreeAsync();
+        var t = await ZoneChainAsync();
 
-        var moved = await t.Org.Http.PatchJsonAsync($"/api/v1/nodes/{t.Level}", new { parentId = (long?)null });
+        var moved = await t.Org.Http.PatchJsonAsync($"/api/v1/nodes/{t.Inner}", new { parentId = (long?)null });
 
         Assert.Equal(HttpStatusCode.OK, moved.StatusCode);
-        var level = await TestApi.ReadJson(moved);
-        Assert.Equal($"{t.Level}", level.GetProperty("path").GetString());
-        Assert.Equal(JsonValueKind.Null, level.GetProperty("parentId").ValueKind);
+        var inner = await TestApi.ReadJson(moved);
+        Assert.Equal($"{t.Inner}", inner.GetProperty("path").GetString());
+        Assert.Equal(JsonValueKind.Null, inner.GetProperty("parentId").ValueKind);
     }
 
     [Fact]
     public async Task Move_UnderOwnSubtree_IsConflict()
     {
-        var t = await LocationTreeAsync();
+        var t = await ZoneChainAsync();
 
-        var response = await t.Org.Http.PatchJsonAsync($"/api/v1/nodes/{t.Building}", new { parentId = t.Room });
+        var response = await t.Org.Http.PatchJsonAsync($"/api/v1/nodes/{t.Outer}", new { parentId = t.Inner });
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         Assert.Equal("node.cycle", await TestApi.ErrorCode(response));
-        var room = await t.Org.Http.GetFromJsonAsync<JsonElement>($"/api/v1/nodes/{t.Room}");
-        Assert.Equal($"{t.Building}.{t.Level}.{t.Room}", room.GetProperty("path").GetString());
+        var inner = await t.Org.Http.GetFromJsonAsync<JsonElement>($"/api/v1/nodes/{t.Inner}");
+        Assert.Equal($"{t.Outer}.{t.Inner}", inner.GetProperty("path").GetString());
     }
 
     [Fact]

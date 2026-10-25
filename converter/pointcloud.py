@@ -13,6 +13,7 @@ import os
 import struct
 
 import numpy as np
+from messages import msg
 
 MAX_POINTS = int(os.environ.get("CONVERTER_MAX_POINTS", "30000000"))
 POINTS_PER_TILE = 60000
@@ -129,14 +130,14 @@ def convert(path: str, out_dir: str, srs: str | None) -> dict:
     e57 = path.lower().endswith(".e57")
     total = _count_e57(path) if e57 else _count_las(path)
     if total == 0:
-        raise ValueError("The point cloud has no points.")
+        raise ValueError(msg("points_empty"))
     keep = min(1.0, MAX_POINTS / total)
     rng = np.random.default_rng(42)
     xyz, rgb = (_read_e57 if e57 else _read_las)(path, keep, rng)
 
     warnings = []
     if keep < 1:
-        warnings.append(f"{total} points thinned evenly to {len(xyz)} (limit {MAX_POINTS}).")
+        warnings.append(msg("points_thinned", total, len(xyz)))
     georeferenced = bool(srs)
     if georeferenced:
         from pyproj import Transformer
@@ -144,11 +145,11 @@ def convert(path: str, out_dir: str, srs: str | None) -> dict:
         try:
             transformer = Transformer.from_crs(srs, "EPSG:4978", always_xy=True)
         except Exception as e:
-            raise ValueError(f"Unknown coordinate system: {srs}") from e
+            raise ValueError(msg("unknown_srs", srs)) from e
         x, y, z = transformer.transform(xyz[:, 0], xyz[:, 1], xyz[:, 2])
         xyz = np.stack([x, y, z], axis=1)
         if not np.isfinite(xyz).all():
-            raise ValueError(f"The points are outside the area of {srs}: check the coordinate system.")
+            raise ValueError(msg("points_outside_srs", srs))
     tiles = _tiles(xyz, rgb, out_dir, rng)
     return {"kind": "3dtiles", "segmented": False, "points": int(len(xyz)), "sourcePoints": int(total), "tiles": tiles["tiles"],
             "georeferenced": georeferenced, "placement": None, "warnings": warnings}
