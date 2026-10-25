@@ -6,4 +6,5 @@
 
 # Deployment: secrets and backups
 deploy/.env
+deploy/api.env
 deploy/backups/

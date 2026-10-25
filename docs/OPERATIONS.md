@@ -16,6 +16,8 @@ A bináris tartalom (panoráma, modell) soha nem kerül az adatbázisba; a böng
 
 ## 2. Telepítés és frissítés
 
+Új szerver előkészítése (SSH-kulcs, felhasználó, tűzfal, Docker, DNS, `.env`, első indítás): [DEPLOY.md](DEPLOY.md). A MapManager-szolgáltatástokenek a gitből kizárt `deploy/api.env` fájlba kerülnek (`MapManager__Tokens__<hivatkozás>=…`).
+
 ```bash
 cp .env.example .env        # jelszavak, DOMAIN, PUBLIC_URL, tárkulcsok kitöltése
 docker compose up -d --build

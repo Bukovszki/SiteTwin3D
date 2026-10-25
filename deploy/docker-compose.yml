@@ -90,10 +90,15 @@ services:
       Logging__Console__FormatterOptions__IncludeScopes: "true"
       Logging__Console__FormatterOptions__UseUtcTimestamp: "true"
       Logging__Console__FormatterOptions__TimestampFormat: "yyyy-MM-ddTHH:mm:ss.fffZ"
-      # Service tokens of organizations' MapManager connections: MapManager__Tokens__<ref>=mmst_… (spec 6.3)
+      # Service tokens of organizations' MapManager connections: MapManager__Tokens__<ref>=mmst_… (spec 6.3) – in
+      # api.env (below), not here.
       # Behind Caddy: HTTPS is known from X-Forwarded-Proto (the API is not exposed).
       ReverseProxy__TrustForwardedHeaders: "true"
       DataProtection__KeysPath: /data/keys
+    # Secrets of the API outside git, e.g. the MapManager service tokens (MapManager__Tokens__<ref>=mmst_…); optional.
+    env_file:
+      - path: ./api.env
+        required: false
     volumes:
       - dpkeys:/data/keys
     depends_on:
