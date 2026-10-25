@@ -44,6 +44,19 @@ public class NodeType
 }
 
 /// <summary>
+/// Fields an organization adds to a shared base type (user decision): its records of that type get them after the base
+/// type's own fields. The shared base types themselves stay read only.
+/// </summary>
+public class NodeTypeExtension : IOrganizationOwned
+{
+    public long Id { get; set; }
+    public long OrganizationId { get; set; }
+    public long NodeTypeId { get; set; }
+    /// <summary>JSON Schema of the added fields (properties in form order; json, not jsonb, keeps the order).</summary>
+    public JsonDocument AttrSchema { get; set; } = JsonDocument.Parse("{}");
+}
+
+/// <summary>
 /// Any element of the hierarchy (spec 8.1). <see cref="Path"/> (ltree of ids) is maintained by database triggers
 /// (db/sql/node_path.sql); the application only sets <see cref="ParentId"/>.
 /// </summary>

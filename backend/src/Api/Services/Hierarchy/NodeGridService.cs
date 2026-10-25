@@ -20,7 +20,7 @@ public record GridPage(int Total, List<GridRow> Rows);
 /// (JSONB) too. Attribute fields must be properties of the type's JSON Schema; their schema type decides how they
 /// compare (text: contains / equals, number and integer: equals / range, boolean: equals).
 /// </summary>
-public class NodeGridService(AppDbContext db)
+public class NodeGridService(AppDbContext db, NodeTypeService types)
 {
     public const int MaxRows = 500;
 
@@ -37,7 +37,7 @@ public class NodeGridService(AppDbContext db)
         {
             var type = await db.NodeTypes.AsNoTracking().FirstOrDefaultAsync(t => t.Id == typeId, ct)
                 ?? throw AppException.BadRequest("node.unknown_type", $"Node type {typeId} does not exist.");
-            fields = SchemaFields(type.AttrSchema);
+            fields = SchemaFields(await types.SchemaOfAsync(type, ct));
             query = query.Where(n => n.TypeId == typeId);
         }
 

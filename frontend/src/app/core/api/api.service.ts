@@ -3,6 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import {
   Anchor,
+  AttrSchema,
   ChangeView,
   DrawLayer,
   DrawTransaction,
@@ -85,7 +86,21 @@ export class ApiService {
   // Node types
   nodeTypes(): Observable<NodeType[]> {
     return this.http.get<NodeType[]>(`${API}/node-types`);
+  }  createNodeType(body: { code: string; name: string; aspect: 'location' | 'function'; isLevel: boolean; attrSchema: AttrSchema | null }): Observable<NodeType> {
+    return this.http.post<NodeType>(`${API}/node-types`, body);
   }
+  /** Own types: name and fields (attrSchema null removes them). */
+  updateNodeType(id: number, patch: { name?: string; attrSchema?: AttrSchema | null }): Observable<NodeType> {
+    return this.http.patch<NodeType>(`${API}/node-types/${id}`, patch);
+  }
+  deleteNodeType(id: number): Observable<void> {
+    return this.http.delete<void>(`${API}/node-types/${id}`);
+  }
+  /** Shared base types: the organization's own added fields (null removes them). */
+  setNodeTypeExtension(id: number, attrSchema: AttrSchema | null): Observable<NodeType> {
+    return this.http.put<NodeType>(`${API}/node-types/${id}/extension`, { attrSchema });
+  }
+
 
   // Nodes
   tree(siteId: number, aspect: string): Observable<Node[]> {

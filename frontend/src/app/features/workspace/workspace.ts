@@ -22,6 +22,7 @@ import { OverviewMap } from '../map/overview-map';
 import { PanoramaPanel } from '../panorama/panorama-panel';
 import { MapLayersDialog } from '../sites/map-layers-dialog';
 import { SitesDialog } from '../sites/sites-dialog';
+import { TypesDialog } from '../types/types-dialog';
 import { TreePanel } from '../tree/tree-panel';
 import { UsersDialog } from '../users/users-dialog';
 
@@ -53,6 +54,7 @@ import { UsersDialog } from '../users/users-dialog';
     PanoramaPanel,
     SitesDialog,
     MapLayersDialog,
+    TypesDialog,
     UsersDialog,
     SelectButton,
   ],
@@ -105,6 +107,14 @@ import { UsersDialog } from '../users/users-dialog';
           size="small"
           styleClass="bar-button"
           (onClick)="layersOpen.set(true)"
+        />
+        <p-button
+          [label]="m.types.open"
+          icon="pi pi-list"
+          [text]="true"
+          size="small"
+          styleClass="bar-button"
+          (onClick)="typesOpen.set(true)"
         />
       }
       <span class="spacer"></span>
@@ -212,6 +222,7 @@ import { UsersDialog } from '../users/users-dialog';
       @defer {
         <app-sites-dialog [(visible)]="sitesOpen" />
         <app-map-layers-dialog [(visible)]="layersOpen" />
+        <app-types-dialog [(visible)]="typesOpen" />
       }
     }
     @if (auth.isOrgAdmin()) {
@@ -231,6 +242,7 @@ export class Workspace {
   protected readonly center = this.selection.centerView;
   protected readonly sitesOpen = signal(false);
   protected readonly layersOpen = signal(false);
+  protected readonly typesOpen = signal(false);
   protected readonly usersOpen = signal(false);
   protected readonly modeSwitcherKey = signal(0);
   protected readonly can = inject(Permissions);

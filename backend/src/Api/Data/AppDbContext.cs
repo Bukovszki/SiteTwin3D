@@ -34,6 +34,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options, Curren
     public DbSet<UserSiteRole> UserSiteRoles => Set<UserSiteRole>();
     public DbSet<Site> Sites => Set<Site>();
     public DbSet<NodeType> NodeTypes => Set<NodeType>();
+    public DbSet<NodeTypeExtension> NodeTypeExtensions => Set<NodeTypeExtension>();
     public DbSet<Node> Nodes => Set<Node>();
     public DbSet<NodeRelation> NodeRelations => Set<NodeRelation>();
     public DbSet<Panorama> Panoramas => Set<Panorama>();
@@ -106,6 +107,16 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options, Curren
             e.ToTable(t => t.HasCheckConstraint("node_type_aspect", "aspect IN ('location', 'function')"));
             // Shared base types (no organization) and the organization's own types.
             e.HasQueryFilter(x => x.OrganizationId == null || x.OrganizationId == CurrentOrganizationId);
+        });
+
+        modelBuilder.Entity<NodeTypeExtension>(e =>
+        {
+            e.ToTable("node_type_extension");
+            e.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<NodeType>().WithMany().HasForeignKey(x => x.NodeTypeId).OnDelete(DeleteBehavior.Cascade);
+            e.Property(x => x.AttrSchema).HasColumnType("json");
+            // One set of added fields per organization and base type.
+            e.HasIndex(x => new { x.OrganizationId, x.NodeTypeId }).IsUnique();
         });
 
         modelBuilder.Entity<Node>(e =>
@@ -281,6 +292,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options, Curren
         // Organization (spec 3.1) and, for site-restricted users, the readable sites (spec 3.2): rows of other sites are
         // simply not found. Tables without a site column reach their site through the node, level or drawing layer.
         OrganizationOwned<UserSiteRole>(modelBuilder, x => true);
+        OrganizationOwned<NodeTypeExtension>(modelBuilder, x => true);
         OrganizationOwned<Site>(modelBuilder, x => ReadableSites == null || ReadableSites.Contains(x.Id));
         OrganizationOwned<Node>(modelBuilder, x => ReadableSites == null || ReadableSites.Contains(x.SiteId));
         OrganizationOwned<ModelAsset>(modelBuilder, x => ReadableSites == null || ReadableSites.Contains(x.SiteId));

@@ -24,7 +24,7 @@ public record RelationCreate(long ToId, string Kind);
 /// on another site (fk_node_parent_same_site). Every query is organization-filtered: another organization's node is
 /// simply not found (404).
 /// </summary>
-public class NodeService(AppDbContext db, Auth.CurrentUser currentUser)
+public class NodeService(AppDbContext db, Auth.CurrentUser currentUser, NodeTypeService types)
 {
     public const int MaxNameLength = 200;
 
@@ -81,7 +81,8 @@ public class NodeService(AppDbContext db, Auth.CurrentUser currentUser)
 
         var attrs = request.Attrs ?? EmptyObject();
         AttrValidator.RejectReserved(attrs);
-        AttrValidator.Validate(type.AttrSchema, attrs);
+        // The type's fields with the organization's own ones (added to a shared base type).
+        AttrValidator.Validate(await types.SchemaOfAsync(type, ct), attrs);
 
         var node = new Node
         {
@@ -134,7 +135,7 @@ public class NodeService(AppDbContext db, Auth.CurrentUser currentUser)
         }
         if ((request.Attrs is not null || request.TypeId is not null) && !AttrValidator.IsLinked(node.Attrs.RootElement))
         {
-            AttrValidator.Validate(type.AttrSchema, attrs);
+            AttrValidator.Validate(await types.SchemaOfAsync(type, ct), attrs);
             node.Attrs = JsonSerializer.SerializeToDocument(attrs);
         }
 

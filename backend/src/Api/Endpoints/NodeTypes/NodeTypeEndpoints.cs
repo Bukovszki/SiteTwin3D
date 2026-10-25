@@ -8,12 +8,23 @@ using Microsoft.Extensions.Options;
 
 namespace Api.Endpoints.NodeTypes;
 
-/// <summary>Node type; <see cref="Shared"/> base types are read only.</summary>
-public record NodeTypeDto(long Id, string Code, string Name, string Aspect, bool IsLevel, bool Shared, JsonElement? AttrSchema)
+/// <summary>
+/// Node type; <see cref="Shared"/> base types are read only. <see cref="AttrSchema"/>: the fields that apply in the
+/// organization (form, grid, import) – for a shared type its own plus <see cref="ExtensionSchema"/>, the organization's
+/// added fields; <see cref="BaseSchema"/>: the type's own fields only.
+/// </summary>
+public record NodeTypeDto(long Id, string Code, string Name, string Aspect, bool IsLevel, bool Shared, JsonElement? AttrSchema,
+    JsonElement? BaseSchema, JsonElement? ExtensionSchema)
 {
-    public static NodeTypeDto From(NodeType t) =>
-        new(t.Id, t.Code, t.Name, t.Aspect, t.IsLevel, t.OrganizationId is null, t.AttrSchema?.RootElement.Clone());
+    public static NodeTypeDto From(NodeTypeView v) =>
+        new(v.Type.Id, v.Type.Code, v.Type.Name, v.Type.Aspect, v.Type.IsLevel, v.Type.OrganizationId is null,
+            v.Schema?.RootElement.Clone(), v.Type.AttrSchema?.RootElement.Clone(), v.Extension?.RootElement.Clone());
+
+    public static NodeTypeDto From(NodeType t) => From(new NodeTypeView(t, null));
 }
+
+/// <summary>The organization's own fields of a shared base type (JSON Schema; null or no properties: removed).</summary>
+public record NodeTypeExtensionRequest(JsonElement? AttrSchema);
 
 public static class NodeTypeEndpoints
 {
@@ -27,6 +38,8 @@ public static class NodeTypeEndpoints
         group.MapPatch("/{id:long}", Update).RequireAuthorization(Policies.OrgAdmin)
             .WithSummary("Name and attrSchema of an own type (null removes the schema)");
         group.MapDelete("/{id:long}", Delete).RequireAuthorization(Policies.OrgAdmin).WithSummary("Delete an unused own type");
+        group.MapPut("/{id:long}/extension", SetExtension).RequireAuthorization(Policies.OrgAdmin)
+            .WithSummary("The organization's own fields added to a shared base type (its records get them after the base fields)");
         return group;
     }
 
@@ -45,6 +58,9 @@ public static class NodeTypeEndpoints
         var request = new NodeTypeUpdate(patch.Get<string>("name"), patch.Json("attrSchema"), patch.Has("attrSchema"));
         return TypedResults.Ok(NodeTypeDto.From(await types.UpdateAsync(id, request, ct)));
     }
+
+    private static async Task<Ok<NodeTypeDto>> SetExtension(long id, NodeTypeExtensionRequest request, NodeTypeService types, CancellationToken ct) =>
+        TypedResults.Ok(NodeTypeDto.From(await types.SetExtensionAsync(id, request.AttrSchema, ct)));
 
     private static async Task<NoContent> Delete(long id, NodeTypeService types, CancellationToken ct)
     {

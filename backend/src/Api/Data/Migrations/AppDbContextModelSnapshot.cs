@@ -921,6 +921,41 @@ namespace Api.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Api.Model.NodeTypeExtension", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<JsonDocument>("AttrSchema")
+                        .IsRequired()
+                        .HasColumnType("json")
+                        .HasColumnName("attr_schema");
+
+                    b.Property<long>("NodeTypeId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("node_type_id");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("organization_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_node_type_extension");
+
+                    b.HasIndex("NodeTypeId")
+                        .HasDatabaseName("ix_node_type_extension_node_type_id");
+
+                    b.HasIndex("OrganizationId", "NodeTypeId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_node_type_extension_organization_id_node_type_id");
+
+                    b.ToTable("node_type_extension", (string)null);
+                });
+
             modelBuilder.Entity("Api.Model.Organization", b =>
                 {
                     b.Property<long>("Id")
@@ -1412,6 +1447,23 @@ namespace Api.Data.Migrations
                         .HasForeignKey("OrganizationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .HasConstraintName("fk_node_type_organization_organization_id");
+                });
+
+            modelBuilder.Entity("Api.Model.NodeTypeExtension", b =>
+                {
+                    b.HasOne("Api.Model.NodeType", null)
+                        .WithMany()
+                        .HasForeignKey("NodeTypeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_node_type_extension_node_type_node_type_id");
+
+                    b.HasOne("Api.Model.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_node_type_extension_organization_organization_id");
                 });
 
             modelBuilder.Entity("Api.Model.Panorama", b =>

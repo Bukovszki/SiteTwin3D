@@ -89,6 +89,14 @@ A példában az Adatgazda egy szennyvíztisztító telepet vesz fel: két épül
 
 > Tipp: a felhasználókat a felhasználói menü → *Felhasználók* alatt lehet felvenni; a *Telephelyi jogok* résznél korlátozható, hogy ki melyik telephelyet lássa.
 
+### Típusok és saját mezők (szervezeti admin)
+
+*Előkészítés mód, fejléc → **Típusok**.* Itt dől el, milyen leíró adatokat lehet egy elemhez felvinni.
+
+- **Alaptípusokhoz saját mezők:** válassza ki pl. a **Helyiség** típust → **Mező hozzáadása** → felirat (pl. *Alapterület (m²)*), fajta (*Szöveg, Egész szám, Szám, Igen/nem, Választólista, Dátum*), *Kötelező* → **Mentés**. A mezők a szervezet minden helyiségénél megjelennek az adatlapon, a táblázat oszlopaiban és a táblázatos importban; más szervezetet nem érintenek.
+- **Új saját típus:** **Új típus** → megnevezés (a kód magától képződik), fa (*Helyszín* vagy *Funkció*), szükség esetén *Szint típus*, mezők → **Mentés**. Ezután a fában az új típusú elem is létrehozható.
+- A mezők sorrendje (nyilakkal) az adatlap és a táblázat oszlopainak sorrendje. Egy mező törlésekor a már beírt értékek megmaradnak, csak nem jelennek meg.
+
 ### 2. Helyszíni szerkezet: épületek, szintek, helyiségek
 
 *Előkészítés mód, Fa fül, Helyszín nézet.*

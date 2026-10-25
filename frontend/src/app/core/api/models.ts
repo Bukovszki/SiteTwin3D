@@ -71,6 +71,8 @@ export interface Site {
 export interface JsonSchemaProperty {
   type?: 'string' | 'number' | 'integer' | 'boolean';
   title?: string;
+  /** 'date': YYYY-MM-DD (date picker in the form). */
+  format?: 'date';
   enum?: (string | number)[];
   minimum?: number;
   maximum?: number;
@@ -90,7 +92,12 @@ export interface NodeType {
   aspect: 'location' | 'function';
   isLevel: boolean;
   shared: boolean;
+  /** The fields that apply in the organization: the type's own, then the organization's added ones (shared types). */
   attrSchema: AttrSchema | null;
+  /** The type's own fields only. */
+  baseSchema: AttrSchema | null;
+  /** Shared types: the organization's added fields. */
+  extensionSchema: AttrSchema | null;
 }
 
 export interface Node {

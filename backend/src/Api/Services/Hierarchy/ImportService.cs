@@ -23,7 +23,7 @@ public record ImportError(int Row, string Code, string? Field, string Message);
 /// type) are updated (given fields merged), others created under the parent. All or nothing: any error → 400 with
 /// every error, nothing saved.
 /// </summary>
-public class ImportService(AppDbContext db, NodeService nodes)
+public class ImportService(AppDbContext db, NodeService nodes, NodeTypeService types)
 {
     public const int MaxRows = 10_000;
 
@@ -39,7 +39,9 @@ public class ImportService(AppDbContext db, NodeService nodes)
             ?? throw AppException.BadRequest("node.unknown_type", $"Node type {request.TypeId} does not exist.");
         if (request.ParentId is { } parentId) await nodes.CheckParentAsync(parentId, siteId, type, ct);
 
-        var properties = SchemaProperties(type.AttrSchema);
+        // The type's fields with the organization's own ones (added to a shared base type).
+        var schema = await types.SchemaOfAsync(type, ct);
+        var properties = SchemaProperties(schema);
         var codes = request.Rows.Select(r => r.Code?.Trim()).Where(c => !string.IsNullOrEmpty(c)).ToList();
         var existing = await db.Nodes.Where(n => n.SiteId == siteId && n.TypeId == type.Id && n.Code != null && codes.Contains(n.Code))
             .ToDictionaryAsync(n => n.Code!, ct);
@@ -71,7 +73,7 @@ public class ImportService(AppDbContext db, NodeService nodes)
                 }
                 var merged = JsonNode.Parse(node.Attrs.RootElement.GetRawText())!.AsObject();
                 foreach (var (key, value) in values) merged[key] = value?.DeepClone();
-                if (!Validate(type, merged, rowNumber, errors)) continue;
+                if (!Validate(schema, merged, rowNumber, errors)) continue;
                 node.Attrs = JsonSerializer.SerializeToDocument(merged);
                 if (name is not null) node.Name = name;
                 updated++;
@@ -83,7 +85,7 @@ public class ImportService(AppDbContext db, NodeService nodes)
                     errors.Add(new(rowNumber, "import.name_required", "name", "A new record needs a name (or at least a code)."));
                     continue;
                 }
-                if (!Validate(type, values, rowNumber, errors)) continue;
+                if (!Validate(schema, values, rowNumber, errors)) continue;
                 db.Nodes.Add(new Node
                 {
                     SiteId = siteId,
@@ -103,11 +105,11 @@ public class ImportService(AppDbContext db, NodeService nodes)
         return new ImportResult(created, updated);
     }
 
-    private static bool Validate(NodeType type, JsonObject attrs, int rowNumber, List<ImportError> errors)
+    private static bool Validate(JsonDocument? schema, JsonObject attrs, int rowNumber, List<ImportError> errors)
     {
         try
         {
-            AttrValidator.Validate(type.AttrSchema, JsonSerializer.SerializeToElement(attrs));
+            AttrValidator.Validate(schema, JsonSerializer.SerializeToElement(attrs));
             return true;
         }
         catch (AppException ex) when (ex.Errors is List<AttrValidator.AttrError> attrErrors)

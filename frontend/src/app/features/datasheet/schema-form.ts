@@ -26,7 +26,7 @@ export function schemaFields(schema: AttrSchema | null | undefined): SchemaField
 
 /**
  * Form generated from the node type's JSON Schema (FR-H5): a new field needs only a schema change. The backend
- * validates fully; here only the input kinds follow the schema (text, number, integer, boolean, enum).
+ * validates fully; here only the input kinds follow the schema (text, date, number, integer, boolean, enum).
  */
 @Component({
   selector: 'app-schema-form',
@@ -55,8 +55,13 @@ export function schemaFields(schema: AttrSchema | null | undefined): SchemaField
                   [useGrouping]="false" [min]="field.property.minimum ?? null" [max]="field.property.maximum ?? null" [disabled]="readonly()" fluid />
               }
               @default {
-                <input pInputText [id]="idPrefix() + field.name" [ngModel]="value()[field.name] ?? ''" (ngModelChange)="set(field.name, $event)"
-                  [disabled]="readonly()" />
+                @if (field.property.format === 'date') {
+                  <input pInputText type="date" [id]="idPrefix() + field.name" [ngModel]="value()[field.name] ?? ''"
+                    (ngModelChange)="set(field.name, $event)" [disabled]="readonly()" />
+                } @else {
+                  <input pInputText [id]="idPrefix() + field.name" [ngModel]="value()[field.name] ?? ''" (ngModelChange)="set(field.name, $event)"
+                    [disabled]="readonly()" />
+                }
               }
             }
           }
