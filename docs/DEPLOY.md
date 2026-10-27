@@ -469,7 +469,34 @@ cd /opt/app/deploy && ./restore.sh backups/db/appdb-<időbélyeg>.dump
 
 A visszaállítás után a felhasználóknak újra be kell lépniük. Ha a MapManager címe változott, a szervezet **MapManager címét** írd át, és a tokent tedd az `api.env`-be (12.4).
 
-**MapManager:** a saját mentésével (`backup.sh`: adatbázis, GeoServer-adatok, feltöltések), visszaállítás a MapManager leírásának „Visszaállítás” része szerint (`pg_restore`, majd a `geoserver_data`, `uploads`, `dpkeys` kötetek). A rétegek nevei a mentéssel együtt jönnek, így ennek a rendszernek a réteg- és alaprajz-hivatkozásai érvényesek maradnak.
+**MapManager:** két szkript ebben a repóban (`deploy/edge/`), a MapManager saját `backup.sh`-jára építve. Négy dolgot visz át: adatbázis, GeoServer adatkönyvtár (`geoserver_data`), feltöltött fájlok (`uploads`), süti-kulcsok (`dpkeys`). Mellé a régi `.env`-et is, mert a GeoServer adatkönyvtára a **régi** GeoServer-admin jelszót és az adattárak adatbázis-jelszavát (`GEOSERVER_DB_PASSWORD`) tartalmazza – az új `.env`-be ezek kerülnek át, a többi (pl. `DOMAIN`) az új marad. A `pg_dump` a szerepköröket nem menti: a GeoServer olvasó szerepkörei (`mapmanager_olvaso`, `mapmanager_geoserver`) a visszaállítás előtt jönnek létre.
+
+Előfeltétel az új szerveren:
+
+1. **A belépési pont fut** (12.1), és ez a rendszer mögötte van (12.2): `docker ps`-ben az `edge-edge-1` foglalja a 80/443-at, a `twin-web-1`-nek nincs nyilvános portja. Ha a belépési pont a MapManager első indításakor még nem fut, a MapManager webszervere nem kap tanúsítványt (a Let's Encrypt „Connection refused”-ot kap a 80-as porton, a böngésző `ERR_SSL_PROTOCOL_ERROR`-t mutat) – ilyenkor a belépési pont elindítása után `cd /opt/mapmanager/deploy && docker compose restart web`.
+2. A MapManager a 12.3 szerint klónozva, ugyanaz vagy újabb verzió, mint a régin. A `.env`-et legegyszerűbb a csomagban lévő régiből indítani, és csak a címet átírni:
+   ```bash
+   cd /opt/mapmanager/deploy
+   tar -xOf ~/mapmanager-migration-<időbélyeg>.tar <időbélyeg>/mapmanager.env > .env && chmod 600 .env
+   nano .env    # DOMAIN=mapmanager.<új név>, ACME_EMAIL, COMPOSE_FILE=docker-compose.yml:/opt/app/deploy/edge/mapmanager.yml
+   ``` Ez a repó (és benne a két szkript) mindkét szerveren legyen meg (`/opt/app`); ha a régin nincs, a `mapmanager-export.sh`-t elég odamásolni.
+
+```bash
+# 1. RÉGI szerveren – leállítja a szerkesztést (api, web, geoserver), ment, egy fájlba csomagol (a $HOME-ba)
+MM_DIR=/opt/mapmanager/deploy /opt/app/deploy/edge/mapmanager-export.sh
+
+# 2. Másolás közvetlenül a régi szerverről az újra (a csomag több GB is lehet; jelszavak vannak benne: csak SSH-n).
+#    A saját gépedről, a kulcsodat továbbítva (-A); a -P folytatja, ha megszakad:
+ssh-add && ssh -A deploy@uj
+rsync -P 'root@regi:/root/mapmanager-migration-<időbélyeg>.tar*' ~/
+#    (ha a régi szerverre más kulccsal lépsz be: a gépeden  scp -3 'root@regi:/root/mapmanager-migration-*' deploy@uj:~/ )
+
+# 3. ÚJ szerveren – ellenőrzőösszeg, jelszavak átvétele a .env-be (a régi .env mentése: .env.before-migration-…),
+#    szerepkörök, pg_restore, kötetek, indítás
+MM_DIR=/opt/mapmanager/deploy /opt/app/deploy/edge/mapmanager-import.sh ~/mapmanager-migration-<időbélyeg>.tar
+```
+
+A visszatöltő szkript a végén kiírja, mit kell kézzel ellenőrizni: belépés a régi felhasználókkal, egy réteg a térképen, a GeoServer naplója; ha a régi GeoServerben **Proxy Base URL** volt beállítva, azt jelzi – írd át az új címre (GeoServer → Settings → Global). A rétegek nevei és a szolgáltatástokenek az adatbázissal jönnek, így ennek a rendszernek a réteg- és alaprajz-hivatkozásai érvényesek maradnak; ha a MapManager címe változott, a szervezet **MapManager címét** írd át (12.4). A régi MapManager leállítva marad (`docker compose up -d`-vel újraindítható); ha minden rendben, a csomagot mindkét szerverről töröld.
 
 > Átköltöztetés előtt mindkét rendszerből készüljön friss mentés a régi szerveren, és az új szerveren egy próbabelépéssel ellenőrizd az adatokat, mielőtt a régit leállítod.
 
