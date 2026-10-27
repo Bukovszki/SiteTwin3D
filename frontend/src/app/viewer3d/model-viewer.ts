@@ -74,6 +74,7 @@ import { handleAxis, handleCursor, handleIcon } from './handle-icons';
 import { PIN, panoramaIcon, panoramaIconSize, panoramaState, placeIcon } from '../core/markers/marker-icons';
 import { NavAction, navigate } from './navigation';
 import { GroundMap, groundable } from './ground-map';
+import { Measure3d } from './measure-3d';
 import { ModelsDialog } from './models-dialog';
 import { BoxImportDialog } from '../features/import/box-import-dialog';
 
@@ -107,6 +108,8 @@ type Tool = 'box' | 'point' | 'element';
  */
 @Component({
   selector: 'app-model-viewer',
+  // Esc ends measuring.
+  host: { '(document:keydown.escape)': 'escapeMeasure()' },
   imports: [
     FormsModule,
     Button,
@@ -164,6 +167,25 @@ type Tool = 'box' | 'point' | 'element';
           appendTo="body"
           [pTooltip]="m.viewer3d.groundHint"
         />
+        <!-- Distances on the model: in every mode (it changes nothing). -->
+        <p-button
+          icon="pi pi-arrows-h"
+          [text]="!measuring()"
+          [outlined]="measuring()"
+          size="small"
+          [pTooltip]="m.measure.distance"
+          (onClick)="toggleMeasure()"
+        />
+        @if (measureCount() > 0) {
+          <p-button
+            icon="pi pi-eraser"
+            [text]="true"
+            size="small"
+            severity="secondary"
+            [pTooltip]="m.measure.clear"
+            (onClick)="clearMeasure()"
+          />
+        }
         <!-- Boxes, points and elements are placed on a model: without one the tools are not offered. -->
         @if (can.anchors() && readyModels().length > 0) {
           <p-button
@@ -229,6 +251,9 @@ type Tool = 'box' | 'point' | 'element';
           {{ text }}
           @if (floorPartial() && tool() !== 'element') {
             <br /><small>{{ m.viewer3d.snapPartial }}</small>
+          }
+          @if (measuring() && measureSummary(); as s) {
+            <br /><b>{{ s }}</b>
           }
         </p-message>
       } @else if (converting()) {
@@ -451,6 +476,11 @@ export class ModelViewer {
   protected readonly levels = signal<LevelInfo[]>([]);
   protected readonly boxes = signal<Anchor[]>([]);
   protected readonly tool = signal<Tool | null>(null);
+  /** Measuring distances (not a placing tool: nothing is stored). */
+  protected readonly measuring = signal(false);
+  protected readonly measureCount = signal(0);
+  protected readonly measureSummary = signal<string | null>(null);
+  private measure: Measure3d | null = null;
   /** Model elements linked to records (model_feature anchors). */
   protected readonly elements = signal<Anchor[]>([]);
   /** One place per node; those only with a point or info-point place get a marker here (boxes and elements show themselves). */
@@ -642,6 +672,7 @@ export class ModelViewer {
     const scene = this.viewer.scene;
     scene.primitives.add(this.volumes);
     this.ground = new GroundMap(this.viewer);
+    this.measure = new Measure3d(this.viewer, this.m);
     this.ground.show(
       this.mapLayers().find((l) => l.id === this.groundLayerId()) ?? null,
       this.selection.site(),
@@ -662,6 +693,14 @@ export class ModelViewer {
       this.preview(e.endPosition);
     }, ScreenSpaceEventType.MOUSE_MOVE);
     this.handler.setInputAction(() => this.pointerUp(), ScreenSpaceEventType.LEFT_UP);
+    // A double click ends a measured line; the viewer's own double click (fly to the entity under it) would jump
+    // the camera to a measured point or a marker.
+    this.viewer.cesiumWidget.screenSpaceEventHandler.removeInputAction(ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
+    this.handler.setInputAction(() => {
+      if (!this.measuring()) return;
+      this.measure?.finish();
+      this.measured();
+    }, ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
     this.handler.setInputAction(
       (e: { position: Cartesian2 }) => this.click(e.position),
       ScreenSpaceEventType.LEFT_CLICK,
@@ -1031,7 +1070,7 @@ export class ModelViewer {
   private drawSnapTargets(): void {
     this.snapLayer.entities.removeAll();
     const site = this.selection.site();
-    const placing = this.tool() === 'box' || this.tool() === 'point' || this.editing() != null;
+    const placing = this.tool() === 'box' || this.tool() === 'point' || this.measuring() || this.editing() != null;
     if (!site || !placing || this.snapTolerance() <= 0) return;
     const height = site.baseHeightM + this.levelElevation(this.selection.levelId()) + 0.03;
     const lines: [number, number][][] = [];
@@ -1069,7 +1108,7 @@ export class ModelViewer {
     if (!indicator || !this.viewer) return;
     const tool = this.tool();
     const surface =
-      tool === 'box' || tool === 'point' ? this.viewer.scene.pickPosition(position) : undefined;
+      tool === 'box' || tool === 'point' || this.measuring() ? this.viewer.scene.pickPosition(position) : undefined;
     if (!surface) {
       indicator.show = false;
       return;
@@ -1442,6 +1481,20 @@ export class ModelViewer {
 
   private click(position: Cartesian2): void {
     if (!this.viewer || this.dragged || this.pickedHandle(position)) return;
+    if (this.measuring()) {
+      const surface = this.viewer.scene.pickPosition(position);
+      if (!surface) {
+        // A click on the last measured point (e.g. the double click that ends the line) has no surface under it.
+        const last = this.measure?.last;
+        const onLast = last && this.viewer.scene.cartesianToCanvasCoordinates(last);
+        if (onLast && Cartesian2.distance(onLast, position) < 10) return;
+        this.toasts.add({ severity: 'warn', summary: this.m.box.missedModel, life: 3000 });
+        return;
+      }
+      this.measure?.add(this.snapped(surface).point);
+      this.measured();
+      return;
+    }
     const marker = this.pickedEntityId(position);
     if (marker?.startsWith('pano:') && !this.tool()) {
       // The panorama opens beside the 3D view (the 3D stays).
@@ -1514,7 +1567,44 @@ export class ModelViewer {
 
   // ── Editing ─────────────────────────────────────────────────────────────
 
+  protected toggleMeasure(): void {
+    if (this.measuring()) {
+      this.stopMeasure();
+      return;
+    }
+    this.endTool();
+    this.stopEditing();
+    this.measuring.set(true);
+    this.hint.set(this.m.measure.hint3d);
+    this.drawSnapTargets();
+  }
+
+  protected escapeMeasure(): void {
+    if (this.measuring()) this.stopMeasure();
+  }
+
+  /** Measuring ends; the line being drawn is kept if it has a segment. */
+  private stopMeasure(): void {
+    this.measure?.finish();
+    this.measuring.set(false);
+    this.hint.set(null);
+    this.measured();
+    this.drawSnapTargets();
+  }
+
+  protected clearMeasure(): void {
+    this.measure?.clear();
+    this.measured();
+  }
+
+  private measured(): void {
+    this.measureCount.set(this.measure?.count ?? 0);
+    const s = this.measure?.summary();
+    this.measureSummary.set(s ? this.m.measure.summary3d(this.m.measure.length(s.total), this.m.measure.length(s.horizontal), s.dz) : null);
+  }
+
   protected startTool(tool: Tool): void {
+    if (this.measuring()) this.stopMeasure();
     const node = this.selection.node();
     if (!node) {
       this.toasts.add({ severity: 'warn', summary: this.m.box.needNode, life: 4000 });

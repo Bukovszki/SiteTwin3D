@@ -328,6 +328,23 @@ export const MESSAGES_HU = {
       range: (n: number) => `A(z) ${n}. mezőnél a legkisebb érték nagyobb a legnagyobbnál.`,
     },
   },
+  measure: {
+    distance: 'Távolságmérés',
+    area: 'Területmérés',
+    clear: 'Mérések törlése',
+    hintDistance: 'Távolság: kattintson a pontokra, dupla kattintás zárja le. Esc: kilépés a mérésből.',
+    hintArea: 'Terület: kattintson a sokszög csúcsaira, dupla kattintás zárja le. Esc: kilépés a mérésből.',
+    hint3d: 'Távolság: kattintson a modell pontjaira (illesztés a csúcsokra, élekre), dupla kattintás zárja le. Esc: kilépés.',
+    length: (m: number) =>
+      m < 1000 ? `${m.toLocaleString('hu-HU', { maximumFractionDigits: 2 })} m` : `${(m / 1000).toLocaleString('hu-HU', { maximumFractionDigits: 3 })} km`,
+    areaValue: (m2: number) =>
+      m2 < 10000
+        ? `${m2.toLocaleString('hu-HU', { maximumFractionDigits: 1 })} m²`
+        : `${(m2 / 10000).toLocaleString('hu-HU', { maximumFractionDigits: 3 })} ha (${Math.round(m2).toLocaleString('hu-HU')} m²)`,
+    /** A 3D measurement: total, and for its last segment the horizontal distance and the height difference. */
+    summary3d: (total: string, horizontal: string, dz: number) =>
+      `Összesen: ${total} · utolsó szakasz vízszintesen ${horizontal}, magasságkülönbség ${dz >= 0 ? '+' : '−'}${Math.abs(dz).toLocaleString('hu-HU', { maximumFractionDigits: 2 })} m`,
+  },
   mapPoint: {
     place: (name: string) => `„${name}” helyének kijelölése az alaprajzon`,
     needNode: 'Előbb válasszon ki egy elemet (pl. berendezést) a fában vagy a táblázatban.',

@@ -6,7 +6,8 @@ export type LonLat = [number, number];
 export type MapTool =
   | { kind: 'point'; done: (point: LonLat) => void; hint?: string }
   | { kind: 'polygon'; done: (ring: LonLat[]) => void; hint?: string }
-  | { kind: 'panorama'; done: (panoramaId: number) => void; hint?: string };
+  | { kind: 'panorama'; done: (panoramaId: number) => void; hint?: string }
+  | { kind: 'measure'; mode: 'distance' | 'area'; hint?: string };
 
 /**
  * A request from a form to the map: pick a point or draw a polygon (e.g. site reference point and extent).
@@ -27,6 +28,11 @@ export class MapToolsService {
 
   drawPolygon(done: (ring: LonLat[]) => void): void {
     this.tool.set({ kind: 'polygon', done });
+  }
+
+  /** Distances or areas on the map, until cancelled (another tool, the button again, Esc). */
+  measure(mode: 'distance' | 'area', hint: string): void {
+    this.tool.set({ kind: 'measure', mode, hint });
   }
 
   cancel(): void {

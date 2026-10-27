@@ -29,6 +29,7 @@ import { DrawPanel } from '../drawing/draw-panel';
 import { PanoramaUploadDialog } from '../panorama/panorama-upload-dialog';
 import { FloorplansDialog } from './floorplans-dialog';
 import { MapLegend } from './map-legend';
+import { MapMeasure, MeasureKind } from './map-measure';
 import { Permissions } from '../../core/auth/permissions';
 import { layerProjection } from '../../core/geo/projections';
 import { MESSAGES } from '../../core/i18n/messages';
@@ -54,6 +55,8 @@ const CONE_LENGTH_M = 8;
  */
 @Component({
   selector: 'app-overview-map',
+  // Esc ends measuring (an unfinished measurement is dropped, the finished ones stay).
+  host: { '(document:keydown.escape)': 'escape()' },
   imports: [FormsModule, Button, Checkbox, Message, Select, Tooltip, PanoramaUploadDialog, FloorplansDialog, DrawPanel, MapLegend],
   template: `
     <div #map class="map"></div>
@@ -78,6 +81,15 @@ const CONE_LENGTH_M = 8;
           <!-- Drawing only in preparation; elsewhere the same panel only shows or hides the layers. -->
           <p-button [icon]="can.prepare() ? 'pi pi-pencil' : 'pi pi-clone'" [text]="true" size="small" [pTooltip]="m.drawing.layers"
             (onClick)="drawingOpen.set(!drawingOpen())" />
+          <!-- Measuring: in every mode (it changes nothing). -->
+          <p-button icon="pi pi-arrows-h" [text]="measuring() !== 'distance'" [outlined]="measuring() === 'distance'" size="small"
+            [pTooltip]="m.measure.distance" (onClick)="toggleMeasure('distance')" />
+          <p-button icon="pi pi-expand" [text]="measuring() !== 'area'" [outlined]="measuring() === 'area'" size="small"
+            [pTooltip]="m.measure.area" (onClick)="toggleMeasure('area')" />
+          @if (measureCount() > 0) {
+            <p-button icon="pi pi-eraser" [text]="true" size="small" severity="secondary" [pTooltip]="m.measure.clear"
+              (onClick)="measure?.clear()" />
+          }
         </div>
       }
       @if (layers().length > 0) {
@@ -213,6 +225,12 @@ export class OverviewMap {
   protected readonly floorplansOpen = signal(false);
   protected readonly drawingOpen = signal(false);
   protected readonly olMap = signal<OlMap | null>(null);
+  protected measure?: MapMeasure;
+  protected readonly measureCount = signal(0);
+  protected readonly measuring = computed(() => {
+    const tool = this.tools.tool();
+    return tool?.kind === 'measure' ? tool.mode : null;
+  });
   protected readonly levelOptions = computed(() => [
     { label: this.m.levels.outdoor, value: null },
     ...this.levels().map((l) => ({ label: l.name, value: l.id })),
@@ -536,6 +554,7 @@ export class OverviewMap {
     // For end-to-end tests: the map instance on its element (screen position of features).
     (this.element().nativeElement as unknown as { olMap: OlMap }).olMap = this.map;
     this.olMap.set(this.map);
+    this.measure = new MapMeasure(this.map, this.m, (count) => this.measureCount.set(count));
     this.map.on('singleclick', (event) => {
       const tool = this.tools.tool();
       if (tool?.kind === 'point') {
@@ -574,7 +593,10 @@ export class OverviewMap {
       // Dragging follows the state at the moment of the drag: panoramas in preparation, anchors only in an editing
       // session (AnchorEditService) – a stray drag never moves an anchor.
       this.translate = new Translate({
-        layers: (l) => (l.getSource() === this.panoramaSource && this.can.prepare()) || (l.getSource() === this.anchorSource && this.edits.active()),
+        // While a tool runs (e.g. measuring) nothing is dragged.
+        layers: (l) =>
+          !this.tools.tool() &&
+          ((l.getSource() === this.panoramaSource && this.can.prepare()) || (l.getSource() === this.anchorSource && this.edits.active())),
         // A marker moves its point or info-point place; a place from a box or model element is moved in 3D.
         filter: (f) => f.get('anchorId') == null || f.get('kind') === 'point' || f.get('kind') === 'panorama_point',
         hitTolerance: 4,
@@ -734,11 +756,22 @@ export class OverviewMap {
     this.map?.getView().fit(extent, { padding: [60, 60, 60, 60], duration: 400, maxZoom: 20 });
   }
 
+  protected toggleMeasure(mode: MeasureKind): void {
+    if (this.measuring() === mode) this.tools.cancel();
+    else this.tools.measure(mode, mode === 'distance' ? this.m.measure.hintDistance : this.m.measure.hintArea);
+  }
+
+  protected escape(): void {
+    if (this.measuring()) this.tools.cancel();
+  }
+
   private useTool(tool: ReturnType<MapToolsService['tool']>): void {
     if (this.draw) {
       this.map?.removeInteraction(this.draw);
       this.draw = undefined;
     }
+    if (tool?.kind === 'measure') this.measure?.start(tool.mode);
+    else this.measure?.stop();
     if (tool?.kind !== 'polygon' || !this.map) return;
     this.draw = new Draw({ type: 'Polygon' });
     this.draw.on('drawend', (event) => {

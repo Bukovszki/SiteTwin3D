@@ -256,6 +256,14 @@ Vonalas elemhez (csővezeték) több doboz is tartozhat.
 
 A Karbantartó riasztást kap: „*Befolyó szivattyú 2 – túlmelegedés*”. Megtekintés módban dolgozik.
 
+### Mérés a térképen és a 3D modellen
+
+*Minden módban, megtekintőknek is – a mérés semmit nem módosít.*
+
+- **Térkép:** az eszköztáron a **Távolságmérés** (vízszintes nyíl) és a **Területmérés** (keret) gomb. Kattintson a pontokra (terület: a sokszög csúcsaira), **dupla kattintás** zárja le; a felirat mérés közben is mutatja az értéket. A lezárt mérések a térképen maradnak, a **radír** gomb törli őket; **Esc** vagy a gomb újbóli megnyomása kilép a mérésből.
+- **3D modell:** a 3D eszköztár **Távolságmérés** gombja. A modell pontjaira kattintva szakaszonként a valódi térbeli távolság látszik; a pontok a rajzi réteg csúcsaira, éleire illeszkednek (az illesztés tűrése az eszköztáron állítható). Az alsó sávban az összesen mért hossz, az utolsó szakasz **vízszintes távolsága** és **magasságkülönbsége**. Dupla kattintás zárja le a vonalat, a következő kattintás újat kezd.
+- A mérés valódi méterben számol (a 2D-ben az ellipszoidon, nem a térkép vetületében), így a Web Mercator torzítása (Magyarországon kb. 1,5-szeres) nem hat rá. A 3D-ben a pontok közötti relatív távolság számít, a modell elhelyezésétől függetlenül.
+
 ### Keresés
 
 - **Fa:** a szűrőmezőbe írja be a nevet vagy a kódot (*=P02*); a fa a találatig kinyílik.
